@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -24,12 +25,26 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, data: dict):
+        if not self.active_connections:
+            return
+
+        message = json.dumps(data)
+
+        results = await asyncio.gather(
+            *[
+                connection.send_text(message)
+                for connection in self.active_connections
+            ],
+            return_exceptions=True,
+        )
+
         disconnected = []
 
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(json.dumps(data))
-            except Exception:
+        for connection, result in zip(
+            self.active_connections,
+            results,
+        ):
+            if isinstance(result, Exception):
                 disconnected.append(connection)
 
         for connection in disconnected:
@@ -39,46 +54,66 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+def get_fleet_payload():
+    return {
+        "type": "fleet_update",
+        "timestamp": time.time(),
+        "count": simulator.fleet.count,
+        "ships": [
+            ship.model_dump()
+            for ship in simulator.fleet.ships
+        ],
+    }
+
+
 async def simulator_loop():
+    """
+    Main real-time fleet loop.
+
+    Target:
+    1 update per second.
+    """
+
+    previous_time = time.monotonic()
+
     while True:
-        simulator.tick()
+        current_time = time.monotonic()
 
-        fleet_data = {
-            "type": "fleet_update",
-            "timestamp": asyncio.get_event_loop().time(),
-            "count": simulator.fleet.count,
-            "ships": [
-                ship.model_dump()
-                for ship in simulator.fleet.ships
-            ],
-        }
+        delta_seconds = (
+            current_time - previous_time
+        )
 
-        await manager.broadcast(fleet_data)
+        previous_time = current_time
+
+        simulator.tick(delta_seconds)
+
+        await manager.broadcast(
+            get_fleet_payload()
+        )
 
         await asyncio.sleep(1)
 
 
 @router.websocket("/ws/fleet")
-async def fleet_websocket(websocket: WebSocket):
+async def fleet_websocket(
+    websocket: WebSocket,
+):
     await manager.connect(websocket)
 
     try:
-        # Send current state immediately after connection
-        initial_data = {
-            "type": "fleet_update",
-            "timestamp": asyncio.get_event_loop().time(),
-            "count": simulator.fleet.count,
-            "ships": [
-                ship.model_dump()
-                for ship in simulator.fleet.ships
-            ],
-        }
+        # Send current state immediately.
+        await websocket.send_text(
+            json.dumps(
+                get_fleet_payload()
+            )
+        )
 
-        await websocket.send_text(json.dumps(initial_data))
-
-        # Keep connection alive
+        # Keep connection alive.
         while True:
             await websocket.receive_text()
 
     except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+    except Exception:
         manager.disconnect(websocket)
