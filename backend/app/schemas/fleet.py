@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
 from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class Position(BaseModel):
@@ -23,8 +24,12 @@ class Ship(BaseModel):
         "normal",
         "warning",
         "critical",
+        "rerouting",
+        "distressed",
+        "stopped",
         "stranded",
-        "distress",
+        "insufficient_fuel",
+        "arrived",
     ] = "normal"
 
 

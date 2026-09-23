@@ -1,5 +1,5 @@
-import math
 import asyncio
+import math
 
 from app.services.fleet_service import get_initial_fleet
 from app.schemas.fleet import Fleet
@@ -10,19 +10,26 @@ class FleetSimulator:
         self.fleet: Fleet = get_initial_fleet()
         self.running = False
 
-    def update_ship_position(self, ship, delta_seconds: float = 1.0):
+    def update_ship_position(
+        self,
+        ship,
+        delta_seconds: float = 1.0,
+    ):
         """
-        Move ship using:
-        speed = knots
-        heading = degrees
-        time = seconds
+        Advance a ship according to its current speed and heading.
+
+        Speed: knots
+        Heading: degrees from true north
+        Time: seconds
         """
 
-        # 1 knot = 1 nautical mile/hour
+        if ship.status in {"stopped", "stranded", "arrived"}:
+            return
+
+        # 1 knot = 1 nautical mile per hour
         distance_nm = ship.speed_knots * (delta_seconds / 3600)
 
-        # Convert nautical miles to degrees
-        # Approximation suitable for our simulation area
+        # 1 degree latitude ≈ 60 nautical miles
         lat_distance = distance_nm / 60
 
         heading_rad = math.radians(ship.heading)
@@ -45,32 +52,34 @@ class FleetSimulator:
         ship.position.lat += delta_lat
         ship.position.lng += delta_lng
 
-    def tick(self):
+    def tick(self, delta_seconds: float = 1.0):
         """
-        Perform one simulator tick.
+        Advance the complete fleet by one simulation tick.
         """
 
         for ship in self.fleet.ships:
-            self.update_ship_position(ship)
+            self.update_ship_position(
+                ship,
+                delta_seconds,
+            )
 
     async def run(self):
         """
-        Run simulator at 1 Hz.
+        Run the simulator at approximately 1 Hz.
         """
 
         self.running = True
 
+        previous_time = asyncio.get_event_loop().time()
+
         while self.running:
-            start_time = asyncio.get_event_loop().time()
+            current_time = asyncio.get_event_loop().time()
+            delta_seconds = current_time - previous_time
+            previous_time = current_time
 
-            self.tick()
+            self.tick(delta_seconds)
 
-            elapsed = asyncio.get_event_loop().time() - start_time
-
-            # Keep simulator at approximately 1 Hz
-            sleep_time = max(0, 1.0 - elapsed)
-
-            await asyncio.sleep(sleep_time)
+            await asyncio.sleep(1)
 
     def stop(self):
         self.running = False
