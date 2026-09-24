@@ -1,43 +1,22 @@
 import { useEffect, useState } from 'react'
 import './App.css'
-
-const fleetUnits = [
-  { id: 'UNIT-042', type: 'Rescue Van', location: 'Sector 7', status: 'DISPATCHED', battery: 86 },
-  { id: 'UNIT-018', type: 'Emergency SUV', location: 'Gulberg', status: 'AVAILABLE', battery: 94 },
-  { id: 'UNIT-031', type: 'Medical Van', location: 'DHA Phase 6', status: 'AVAILABLE', battery: 78 },
-  { id: 'UNIT-067', type: 'Response Truck', location: 'Model Town', status: 'WARNING', battery: 41 },
-]
-
-const crises = [
-  {
-    id: 'CRISIS-03',
-    title: 'Vehicle Collision',
-    location: 'Sector 7, Lahore',
-    priority: 'CRITICAL',
-    time: '04:32',
-  },
-  {
-    id: 'CRISIS-02',
-    title: 'Medical Emergency',
-    location: 'Gulberg III',
-    priority: 'HIGH',
-    time: '11:18',
-  },
-  {
-    id: 'CRISIS-01',
-    title: 'Road Blockage',
-    location: 'Canal Road',
-    priority: 'MEDIUM',
-    time: '22:46',
-  },
-]
+import { useFleetSocket } from './hooks/useFleetSocket'
 
 function App() {
   const [activePage, setActivePage] = useState('Dashboard')
   const [time, setTime] = useState(new Date())
 
+  const {
+    ships,
+    connected,
+    lastUpdate,
+  } = useFleetSocket()
+
   useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000)
+    const timer = setInterval(() => {
+      setTime(new Date())
+    }, 1000)
+
     return () => clearInterval(timer)
   }, [])
 
@@ -46,6 +25,28 @@ function App() {
     minute: '2-digit',
     second: '2-digit',
   })
+
+  const activeShips = ships.length
+
+  const normalShips = ships.filter(
+    (ship) => ship.status === 'normal'
+  ).length
+
+  const alertShips = ships.filter(
+    (ship) =>
+      ship.status === 'warning' ||
+      ship.status === 'critical' ||
+      ship.status === 'distress' ||
+      ship.status === 'stranded'
+  ).length
+
+  const lastUpdateText = lastUpdate
+    ? lastUpdate.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+    : '--:--:--'
 
   return (
     <div className="app-shell">
@@ -76,13 +77,18 @@ function App() {
           ].map(([icon, name]) => (
             <button
               key={name}
-              className={`nav-button ${activePage === name ? 'selected' : ''}`}
+              className={`nav-button ${
+                activePage === name ? 'selected' : ''
+              }`}
               onClick={() => setActivePage(name)}
             >
               <span className="nav-icon">{icon}</span>
               <span>{name}</span>
+
               {name === 'Crisis Center' && (
-                <span className="nav-alert">3</span>
+                <span className="nav-alert">
+                  {alertShips}
+                </span>
               )}
             </button>
           ))}
@@ -91,19 +97,33 @@ function App() {
         <div className="sidebar-bottom">
 
           <div className="network-card">
-            <div className="online-dot"></div>
+            <div
+              className={`online-dot ${
+                connected ? '' : 'offline'
+              }`}
+            ></div>
+
             <div>
-              <strong>SYSTEM ONLINE</strong>
-              <span>All services operational</span>
+              <strong>
+                {connected ? 'SYSTEM ONLINE' : 'CONNECTING'}
+              </strong>
+
+              <span>
+                {connected
+                  ? 'Fleet telemetry operational'
+                  : 'Waiting for backend'}
+              </span>
             </div>
           </div>
 
           <div className="operator">
             <div className="avatar">SA</div>
+
             <div>
               <strong>COMMAND OPERATOR</strong>
               <span>Administrator</span>
             </div>
+
             <span className="more">•••</span>
           </div>
 
@@ -120,14 +140,22 @@ function App() {
             <div className="breadcrumb">
               OPERATIONS <span>/</span> LIVE COMMAND
             </div>
+
             <h1>{activePage}</h1>
           </div>
 
           <div className="topbar-right">
 
             <div className="live-status">
-              <span></span>
-              LIVE MONITORING
+              <span
+                className={`connection-dot ${
+                  connected ? 'online' : 'offline'
+                }`}
+              ></span>
+
+              {connected
+                ? 'FLEET LIVE'
+                : 'CONNECTING...'}
             </div>
 
             <div className="clock">
@@ -137,7 +165,7 @@ function App() {
 
             <div className="notification">
               ♢
-              <b>3</b>
+              <b>{alertShips}</b>
             </div>
 
           </div>
@@ -162,12 +190,14 @@ function App() {
               </h2>
 
               <p>
-                Real-time visibility across your fleet, active incidents,
-                and emergency response operations.
+                Real-time visibility across commercial vessels,
+                operational alerts, and crisis response operations
+                in the Strait of Hormuz.
               </p>
             </div>
 
             <div className="hero-status">
+
               <div className="radar">
                 <div className="radar-ring ring-one"></div>
                 <div className="radar-ring ring-two"></div>
@@ -178,9 +208,16 @@ function App() {
 
               <div>
                 <span>NETWORK STATUS</span>
-                <strong>OPERATIONAL</strong>
-                <small>98.7% fleet connectivity</small>
+
+                <strong>
+                  {connected ? 'OPERATIONAL' : 'CONNECTING'}
+                </strong>
+
+                <small>
+                  Last update: {lastUpdateText}
+                </small>
               </div>
+
             </div>
 
           </section>
@@ -188,54 +225,73 @@ function App() {
           {/* STATS */}
           <section className="stats">
 
+            {/* ACTIVE VESSELS */}
             <div className="stat-card">
+
               <div className="stat-top">
-                <span>ACTIVE FLEETS</span>
+                <span>ACTIVE VESSELS</span>
                 <div className="stat-icon blue">▦</div>
               </div>
 
-              <strong>24</strong>
+              <strong>
+                {activeShips
+                  .toString()
+                  .padStart(2, '0')}
+              </strong>
 
               <div className="stat-footer positive">
-                <span>↗ 8.2%</span>
-                <small>vs last week</small>
+                <span>● LIVE</span>
+                <small>active vessels</small>
               </div>
+
             </div>
 
+            {/* TRACKED SHIPS */}
             <div className="stat-card">
+
               <div className="stat-top">
-                <span>TRACKED VEHICLES</span>
+                <span>TRACKED SHIPS</span>
                 <div className="stat-icon purple">▣</div>
               </div>
 
-              <strong>148</strong>
+              <strong>{activeShips}</strong>
 
               <div className="stat-footer positive">
-                <span>↗ 12.4%</span>
-                <small>vs last week</small>
+                <span>● SYNCHRONIZED</span>
+                <small>real-time tracking</small>
               </div>
+
             </div>
 
+            {/* ACTIVE ALERTS */}
             <div className="stat-card danger-card">
+
               <div className="stat-top">
-                <span>ACTIVE CRISIS</span>
+                <span>ACTIVE ALERTS</span>
                 <div className="stat-icon red">⚠</div>
               </div>
 
-              <strong>03</strong>
+              <strong>
+                {alertShips
+                  .toString()
+                  .padStart(2, '0')}
+              </strong>
 
               <div className="stat-footer danger-text">
-                <span>● 2 require attention</span>
+                <span>● LIVE ALERTS</span>
               </div>
+
             </div>
 
+            {/* NORMAL VESSELS */}
             <div className="stat-card">
+
               <div className="stat-top">
-                <span>AVAILABLE UNITS</span>
+                <span>NORMAL VESSELS</span>
                 <div className="stat-icon green">✓</div>
               </div>
 
-              <strong>67</strong>
+              <strong>{normalShips}</strong>
 
               <div className="availability">
                 <div>
@@ -245,8 +301,10 @@ function App() {
                   <span></span>
                   <span></span>
                 </div>
-                <small>45% ready capacity</small>
+
+                <small>operating normally</small>
               </div>
+
             </div>
 
           </section>
@@ -258,48 +316,46 @@ function App() {
             <div className="panel map-panel">
 
               <div className="panel-header">
+
                 <div>
-                  <span className="panel-label">LIVE OPERATIONS</span>
+                  <span className="panel-label">
+                    LIVE OPERATIONS
+                  </span>
+
                   <h3>Fleet Deployment Map</h3>
                 </div>
 
                 <button className="panel-action">
                   EXPAND ↗
                 </button>
+
               </div>
 
               <div className="map">
 
                 <div className="map-grid"></div>
 
-                <div className="road road-one"></div>
-                <div className="road road-two"></div>
-                <div className="road road-three"></div>
-                <div className="road road-four"></div>
-
-                <div className="map-label label-one">SECTOR 7</div>
-                <div className="map-label label-two">GULBERG</div>
-                <div className="map-label label-three">DHA</div>
-
-                <div className="map-point point-one">
-                  <div className="pulse"></div>
-                  <span>42</span>
+                <div className="map-label label-one">
+                  STRAIT OF HORMUZ
                 </div>
 
-                <div className="map-point point-two">
-                  <div className="pulse"></div>
-                  <span>18</span>
+                <div className="map-label label-two">
+                  PERSIAN GULF
                 </div>
 
-                <div className="map-point point-three">
-                  <div className="pulse"></div>
-                  <span>31</span>
+                <div className="map-label label-three">
+                  GULF OF OMAN
                 </div>
 
-                <div className="map-point crisis-point">
-                  <div className="crisis-pulse"></div>
-                  <span>!</span>
-                </div>
+                {ships.slice(0, 4).map((ship, index) => (
+                  <div
+                    className={`map-point point-${index + 1}`}
+                    key={ship.id}
+                  >
+                    <div className="pulse"></div>
+                    <span>{ship.id.replace('MV-', '')}</span>
+                  </div>
+                ))}
 
                 <div className="map-controls">
                   <button>+</button>
@@ -307,9 +363,20 @@ function App() {
                 </div>
 
                 <div className="map-legend">
-                  <span><i className="green-dot"></i> Available</span>
-                  <span><i className="blue-dot"></i> Dispatched</span>
-                  <span><i className="red-dot"></i> Crisis</span>
+                  <span>
+                    <i className="green-dot"></i>
+                    Normal
+                  </span>
+
+                  <span>
+                    <i className="blue-dot"></i>
+                    Tracked
+                  </span>
+
+                  <span>
+                    <i className="red-dot"></i>
+                    Alert
+                  </span>
                 </div>
 
               </div>
@@ -320,51 +387,98 @@ function App() {
             <div className="panel crisis-panel">
 
               <div className="panel-header">
+
                 <div>
-                  <span className="panel-label">INCIDENT RESPONSE</span>
-                  <h3>Active Crisis</h3>
+                  <span className="panel-label">
+                    INCIDENT RESPONSE
+                  </span>
+
+                  <h3>Fleet Alerts</h3>
                 </div>
 
-                <span className="crisis-count">03 ACTIVE</span>
+                <span className="crisis-count">
+                  {alertShips.toString().padStart(2, '0')} ACTIVE
+                </span>
+
               </div>
 
               <div className="crisis-list">
 
-                {crises.map((crisis) => (
-                  <div
-                    className={`crisis-item ${crisis.priority.toLowerCase()}`}
-                    key={crisis.id}
-                  >
+                {ships
+                  .filter(
+                    (ship) =>
+                      ship.status !== 'normal'
+                  )
+                  .slice(0, 3)
+                  .map((ship) => (
 
+                    <div
+                      className={`crisis-item ${ship.status}`}
+                      key={ship.id}
+                    >
+
+                      <div className="crisis-indicator">
+                        !
+                      </div>
+
+                      <div className="crisis-info">
+
+                        <div className="crisis-title-row">
+                          <strong>{ship.name}</strong>
+                          <span>
+                            {ship.status.toUpperCase()}
+                          </span>
+                        </div>
+
+                        <p>
+                          ◉ Destination: {ship.destination}
+                        </p>
+
+                        <small>
+                          {ship.cargo} · {ship.speed_knots} kn
+                        </small>
+
+                      </div>
+
+                      <button className="arrow-button">
+                        →
+                      </button>
+
+                    </div>
+                  ))}
+
+                {alertShips === 0 && (
+                  <div className="crisis-item normal">
                     <div className="crisis-indicator">
-                      !
+                      ✓
                     </div>
 
                     <div className="crisis-info">
                       <div className="crisis-title-row">
-                        <strong>{crisis.title}</strong>
-                        <span>{crisis.priority}</span>
+                        <strong>All vessels normal</strong>
+                        <span>NOMINAL</span>
                       </div>
 
-                      <p>◉ {crisis.location}</p>
+                      <p>
+                        ◉ No active fleet alerts
+                      </p>
 
                       <small>
-                        {crisis.id} · {crisis.time} ago
+                        Continuous monitoring active
                       </small>
                     </div>
-
-                    <button className="arrow-button">→</button>
-
                   </div>
-                ))}
+                )}
 
               </div>
 
               <button
                 className="view-all"
-                onClick={() => setActivePage('Crisis Center')}
+                onClick={() =>
+                  setActivePage('Crisis Center')
+                }
               >
-                VIEW ALL INCIDENTS
+                VIEW ALL ALERTS
                 <span>→</span>
               </button>
 
@@ -379,52 +493,88 @@ function App() {
             <div className="panel fleet-panel">
 
               <div className="panel-header">
+
                 <div>
-                  <span className="panel-label">UNIT MONITORING</span>
+                  <span className="panel-label">
+                    VESSEL MONITORING
+                  </span>
+
                   <h3>Fleet Status</h3>
                 </div>
 
                 <button
                   className="panel-action"
-                  onClick={() => setActivePage('Fleet')}
+                  onClick={() =>
+                    setActivePage('Fleet')
+                  }
                 >
                   VIEW FLEET →
                 </button>
+
               </div>
 
               <div className="fleet-table">
 
                 <div className="table-head">
-                  <span>UNIT</span>
-                  <span>TYPE</span>
-                  <span>LOCATION</span>
+                  <span>VESSEL</span>
+                  <span>CARGO</span>
+                  <span>DESTINATION</span>
                   <span>STATUS</span>
-                  <span>BATTERY</span>
+                  <span>FUEL</span>
                 </div>
 
-                {fleetUnits.map((unit) => (
-                  <div className="fleet-row" key={unit.id}>
+                {ships.slice(0, 6).map((ship) => (
 
-                    <strong>{unit.id}</strong>
+                  <div
+                    className="fleet-row"
+                    key={ship.id}
+                  >
 
-                    <span>{unit.type}</span>
+                    <strong>{ship.name}</strong>
 
-                    <span>◉ {unit.location}</span>
+                    <span>{ship.cargo}</span>
 
-                    <span className={`unit-status ${unit.status.toLowerCase()}`}>
+                    <span>
+                      → {ship.destination}
+                    </span>
+
+                    <span
+                      className={`unit-status ${ship.status}`}
+                    >
                       <i></i>
-                      {unit.status}
+                      {ship.status.toUpperCase()}
                     </span>
 
                     <div className="battery">
+
                       <div>
-                        <span style={{ width: `${unit.battery}%` }}></span>
+                        <span
+                          style={{
+                            width: `${Math.min(
+                              ship.fuel_tons / 100,
+                              100
+                            )}%`,
+                          }}
+                        ></span>
                       </div>
-                      <small>{unit.battery}%</small>
+
+                      <small>
+                        {ship.fuel_tons.toLocaleString()} t
+                      </small>
+
                     </div>
 
                   </div>
+
                 ))}
+
+                {ships.length === 0 && (
+                  <div className="fleet-row">
+                    <span>
+                      Waiting for fleet telemetry...
+                    </span>
+                  </div>
+                )}
 
               </div>
 
@@ -434,47 +584,93 @@ function App() {
             <div className="panel response-panel">
 
               <div className="panel-header">
+
                 <div>
-                  <span className="panel-label">EMERGENCY RESPONSE</span>
-                  <h3>Current Dispatch</h3>
+                  <span className="panel-label">
+                    FLEET OPERATIONS
+                  </span>
+
+                  <h3>Fleet Command</h3>
                 </div>
 
                 <div className="dispatch-live">
                   ● LIVE
                 </div>
+
               </div>
 
               <div className="dispatch-route">
 
-                <div className="dispatch-node">
-                  <div className="node-icon">!</div>
-                  <div>
-                    <span>INCIDENT</span>
-                    <strong>CRISIS-03</strong>
-                    <small>Sector 7, Lahore</small>
-                  </div>
-                </div>
+                {ships.length > 0 ? (
+                  <>
+                    <div className="dispatch-node">
 
-                <div className="route-line">
-                  <span>04:32</span>
-                </div>
+                      <div className="node-icon">
+                        ◉
+                      </div>
 
-                <div className="dispatch-node">
-                  <div className="node-icon vehicle">▣</div>
-                  <div>
-                    <span>RESPONDING UNIT</span>
-                    <strong>UNIT-042</strong>
-                    <small>ETA 03:18</small>
+                      <div>
+                        <span>LEAD VESSEL</span>
+
+                        <strong>
+                          {ships[0].name}
+                        </strong>
+
+                        <small>
+                          {ships[0].cargo} ·{' '}
+                          {ships[0].speed_knots} kn
+                        </small>
+                      </div>
+
+                    </div>
+
+                    <div className="route-line">
+                      <span>LIVE</span>
+                    </div>
+
+                    <div className="dispatch-node">
+
+                      <div className="node-icon vehicle">
+                        →
+                      </div>
+
+                      <div>
+                        <span>DESTINATION</span>
+
+                        <strong>
+                          {ships[0].destination}
+                        </strong>
+
+                        <small>
+                          Heading {ships[0].heading}°
+                        </small>
+                      </div>
+
+                    </div>
+                  </>
+                ) : (
+                  <div className="dispatch-node">
+
+                    <div>
+                      <span>FLEET STATUS</span>
+
+                      <strong>
+                        Waiting for telemetry...
+                      </strong>
+                    </div>
+
                   </div>
-                </div>
+                )}
 
               </div>
 
               <button
                 className="dispatch-button"
-                onClick={() => setActivePage('Dispatch')}
+                onClick={() =>
+                  setActivePage('Fleet')
+                }
               >
-                OPEN DISPATCH CONTROL
+                OPEN FLEET CONTROL
                 <span>→</span>
               </button>
 
@@ -483,7 +679,6 @@ function App() {
           </section>
 
         </div>
-
       </main>
     </div>
   )
