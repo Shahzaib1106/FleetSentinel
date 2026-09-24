@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { useFleetSocket } from './hooks/useFleetSocket'
+import FleetMap from './FleetMap'
 
 function App() {
   const [activePage, setActivePage] = useState('Dashboard')
@@ -332,53 +333,7 @@ function App() {
               </div>
 
               <div className="map">
-
-                <div className="map-grid"></div>
-
-                <div className="map-label label-one">
-                  STRAIT OF HORMUZ
-                </div>
-
-                <div className="map-label label-two">
-                  PERSIAN GULF
-                </div>
-
-                <div className="map-label label-three">
-                  GULF OF OMAN
-                </div>
-
-                {ships.slice(0, 4).map((ship, index) => (
-                  <div
-                    className={`map-point point-${index + 1}`}
-                    key={ship.id}
-                  >
-                    <div className="pulse"></div>
-                    <span>{ship.id.replace('MV-', '')}</span>
-                  </div>
-                ))}
-
-                <div className="map-controls">
-                  <button>+</button>
-                  <button>−</button>
-                </div>
-
-                <div className="map-legend">
-                  <span>
-                    <i className="green-dot"></i>
-                    Normal
-                  </span>
-
-                  <span>
-                    <i className="blue-dot"></i>
-                    Tracked
-                  </span>
-
-                  <span>
-                    <i className="red-dot"></i>
-                    Alert
-                  </span>
-                </div>
-
+                <FleetMap ships={ships} />
               </div>
 
             </div>
