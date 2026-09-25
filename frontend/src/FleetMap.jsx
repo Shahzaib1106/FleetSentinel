@@ -15,10 +15,10 @@ import 'leaflet-draw'
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
-
 
 // ============================================================
 // SHIP COLOR
@@ -43,7 +43,6 @@ const getShipColor = (ship, breached) => {
   return '#22c55e'
 }
 
-
 // ============================================================
 // SHIP ICON
 // ============================================================
@@ -64,7 +63,6 @@ const createShipIcon = (ship, breached) => {
         align-items:center;
         justify-content:center;
       ">
-
         <div style="
           position:absolute;
           top:-8px;
@@ -130,7 +128,6 @@ const createShipIcon = (ship, breached) => {
         ">
           ${ship.name || 'Unknown'}
         </div>
-
       </div>
     `,
 
@@ -139,7 +136,6 @@ const createShipIcon = (ship, breached) => {
     popupAnchor: [0, -20],
   })
 }
-
 
 // ============================================================
 // INITIAL MAP VIEW
@@ -180,7 +176,6 @@ function MapInitialView({ ships }) {
   return null
 }
 
-
 // ============================================================
 // POINT INSIDE POLYGON
 // ============================================================
@@ -213,7 +208,6 @@ function isPointInsidePolygon(lat, lng, polygon) {
   return inside
 }
 
-
 // ============================================================
 // STATUS
 // ============================================================
@@ -225,7 +219,6 @@ function getStatusLabel(status) {
     .replaceAll('_', ' ')
     .toUpperCase()
 }
-
 
 // ============================================================
 // SMOOTH SHIP MOVEMENT
@@ -391,9 +384,7 @@ function AnimatedShipMarker({ ship, breached }) {
                 Destination
               </span>
               <br />
-              <strong>
-                {ship.destination || 'N/A'}
-              </strong>
+              <strong>{ship.destination || 'N/A'}</strong>
             </div>
 
             <div>
@@ -463,7 +454,6 @@ function AnimatedShipMarker({ ship, breached }) {
     </Marker>
   )
 }
-
 
 // ============================================================
 // RESTRICTED ZONE DRAWER
@@ -547,7 +537,6 @@ function RestrictedZoneDrawer({
   return null
 }
 
-
 // ============================================================
 // MAIN FLEET MAP
 // ============================================================
@@ -592,47 +581,49 @@ export default function FleetMap({
     })
   }
 
-  const breachedShips = ships.filter((ship) => {
-    if (!ship.position || !restrictedZone) {
-      return false
-    }
+  const breachedShips = useMemo(() => {
+    return ships.filter((ship) => {
+      if (!ship.position || !restrictedZone) {
+        return false
+      }
 
-    return isPointInsidePolygon(
-      Number(ship.position.lat),
-      Number(ship.position.lng),
-      restrictedZone
+      return isPointInsidePolygon(
+        Number(ship.position.lat),
+        Number(ship.position.lng),
+        restrictedZone
+      )
+    })
+  }, [ships, restrictedZone])
+
+  const breachedIds = useMemo(() => {
+    return new Set(
+      breachedShips.map(
+        (ship) => ship.id || ship.name
+      )
     )
-  })
+  }, [breachedShips])
 
-  const breachedIds = new Set(
-    breachedShips.map(
-      (ship) => ship.id || ship.name
-    )
-  )
-
-  // ==========================================================
-  // SEND BREACHES TO APP / CRISIS CENTER
-  // ==========================================================
-
-  const breachPayload = breachedShips.map((ship) => ({
-    shipId: ship.id || ship.name,
-    shipName: ship.name || 'Unknown Vessel',
-    zoneName: zoneName || 'Restricted Zone',
-    position: {
-      lat: Number(ship.position.lat),
-      lng: Number(ship.position.lng),
-    },
-    status: 'active',
-  }))
-
-  const breachSignature = JSON.stringify(
-    breachPayload
-  )
+  const breachPayload = useMemo(() => {
+    return breachedShips.map((ship) => ({
+      shipId: ship.id || ship.name,
+      shipName:
+        ship.name ||
+        ship.id ||
+        'Unknown Vessel',
+      zoneName:
+        zoneName || 'Restricted Zone',
+      position: {
+        lat: Number(ship.position.lat),
+        lng: Number(ship.position.lng),
+      },
+      status: 'active',
+    }))
+  }, [breachedShips, zoneName])
 
   useEffect(() => {
     onZoneBreachesChange?.(breachPayload)
   }, [
-    breachSignature,
+    breachPayload,
     onZoneBreachesChange,
   ])
 
@@ -695,10 +686,6 @@ export default function FleetMap({
           )
         })}
       </MapContainer>
-
-      {/* ======================================================
-          RESTRICTED ZONE CONTROL
-      ====================================================== */}
 
       {!zonePanelOpen ? (
         <button

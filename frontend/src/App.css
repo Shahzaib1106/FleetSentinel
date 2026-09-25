@@ -1339,3 +1339,486 @@ body {
     opacity: 1;
   }
 }
+/* ============================================================
+   FLEET PAGE
+============================================================ */
+
+.fleet-page {
+  width: 100%;
+}
+
+.fleet-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 30px;
+  margin-bottom: 28px;
+}
+
+.fleet-page-header h2 {
+  margin: 8px 0 12px;
+  font-size: 46px;
+  line-height: .95;
+  letter-spacing: -2px;
+}
+
+.fleet-page-header h2 span {
+  opacity: .45;
+}
+
+.fleet-page-header p {
+  max-width: 600px;
+  margin: 0;
+  color: #7d8491;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.fleet-live-box {
+  min-width: 190px;
+  padding: 15px 18px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.025);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.fleet-live-box strong {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.fleet-live-box small {
+  display: block;
+  color: #69717e;
+  margin-top: 4px;
+  font-size: 9px;
+}
+
+.fleet-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 12px rgba(34,197,94,.8);
+}
+
+/* STATS */
+
+.fleet-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.fleet-stat {
+  padding: 18px;
+  border: 1px solid rgba(255,255,255,.07);
+  background: rgba(255,255,255,.025);
+}
+
+.fleet-stat > span {
+  display: block;
+  color: #737b88;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+}
+
+.fleet-stat strong {
+  display: block;
+  margin: 8px 0;
+  font-size: 30px;
+}
+
+.fleet-stat small {
+  color: #22c55e;
+  font-size: 8px;
+  letter-spacing: .8px;
+}
+
+.fleet-stat.warning-stat small {
+  color: #eab308;
+}
+
+.fleet-stat.danger-stat small {
+  color: #ef4444;
+}
+
+/* CONTROLS */
+
+.fleet-controls {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 14px;
+}
+
+.fleet-search {
+  flex: 1;
+  max-width: 480px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 13px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.025);
+}
+
+.fleet-search span {
+  color: #6b7280;
+  font-size: 18px;
+}
+
+.fleet-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 11px;
+}
+
+.fleet-search input::placeholder {
+  color: #59616d;
+}
+
+.fleet-filters {
+  display: flex;
+  gap: 6px;
+}
+
+.fleet-filters button {
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.025);
+  color: #727a87;
+  padding: 0 13px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  cursor: pointer;
+}
+
+.fleet-filters button:hover,
+.fleet-filters button.active {
+  color: #fff;
+  border-color: rgba(255,255,255,.2);
+  background: rgba(255,255,255,.07);
+}
+
+/* TABLE */
+
+.fleet-full-panel {
+  overflow: hidden;
+}
+
+.fleet-full-table {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.fleet-full-head,
+.fleet-full-row {
+  min-width: 1100px;
+  display: grid;
+  grid-template-columns:
+    1.25fr
+    .8fr
+    1fr
+    1.25fr
+    .7fr
+    .7fr
+    1fr
+    1.15fr
+    .5fr;
+  align-items: center;
+  column-gap: 14px;
+  padding: 14px 18px;
+}
+
+.fleet-full-head {
+  border-top: 1px solid rgba(255,255,255,.05);
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  color: #606875;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.fleet-full-row {
+  min-height: 65px;
+  border-bottom: 1px solid rgba(255,255,255,.045);
+  color: #b8bec8;
+  font-size: 10px;
+  transition: background .2s ease;
+}
+
+.fleet-full-row:hover {
+  background: rgba(255,255,255,.025);
+}
+
+.vessel-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+  font-size: 11px;
+}
+
+.vessel-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34,197,94,.6);
+}
+
+.vessel-dot.warning {
+  background: #eab308;
+  box-shadow: 0 0 8px rgba(234,179,8,.6);
+}
+
+.vessel-dot.critical {
+  background: #ef4444;
+  box-shadow: 0 0 10px rgba(239,68,68,.7);
+}
+
+.vessel-dot.rerouting {
+  background: #60a5fa;
+  box-shadow: 0 0 8px rgba(96,165,250,.6);
+}
+
+.vessel-dot.stopped {
+  background: #9ca3af;
+  box-shadow: none;
+}
+
+.vessel-dot.arrived {
+  background: #a78bfa;
+}
+
+.muted {
+  color: #626b78;
+}
+
+.fleet-fuel {
+  min-width: 75px;
+}
+
+.fuel-bar {
+  width: 70px;
+  height: 4px;
+  background: rgba(255,255,255,.08);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.fuel-bar span {
+  display: block;
+  height: 100%;
+  background: #22c55e;
+}
+
+.fleet-fuel small {
+  color: #68717d;
+  font-size: 8px;
+}
+
+.fleet-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.fleet-status i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+.fleet-status.warning {
+  color: #eab308;
+}
+
+.fleet-status.warning i {
+  background: #eab308;
+}
+
+.fleet-status.critical {
+  color: #ef4444;
+}
+
+.fleet-status.critical i {
+  background: #ef4444;
+}
+
+.fleet-status.rerouting {
+  color: #60a5fa;
+}
+
+.fleet-status.rerouting i {
+  background: #60a5fa;
+}
+
+.fleet-status.stopped {
+  color: #9ca3af;
+}
+
+.fleet-status.stopped i {
+  background: #9ca3af;
+}
+
+.fleet-status.arrived {
+  color: #a78bfa;
+}
+
+.fleet-status.arrived i {
+  background: #a78bfa;
+}
+
+.details-button {
+  border: 1px solid rgba(255,255,255,.1);
+  background: transparent;
+  color: #89919d;
+  padding: 6px 9px;
+  font-size: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.details-button:hover {
+  color: #fff;
+  border-color: rgba(255,255,255,.25);
+}
+
+.fleet-empty {
+  min-width: 1100px;
+  padding: 60px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  color: #68717d;
+}
+
+.fleet-empty strong {
+  color: #aeb5bf;
+}
+
+/* SHIP MODAL */
+
+.ship-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 25px;
+  background: rgba(0,0,0,.72);
+  backdrop-filter: blur(5px);
+}
+
+.ship-modal {
+  width: min(620px, 100%);
+  border: 1px solid rgba(255,255,255,.1);
+  background: #10141a;
+  box-shadow: 0 25px 80px rgba(0,0,0,.55);
+}
+
+.ship-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 22px;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+}
+
+.ship-modal-header > div > span {
+  color: #69727f;
+  font-size: 8px;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+
+.ship-modal-header h3 {
+  margin: 6px 0 0;
+  font-size: 23px;
+}
+
+.ship-modal-header button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: transparent;
+  color: #8b93a0;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.ship-status-large {
+  margin: 18px 22px;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255,255,255,.07);
+  color: #9da5b0;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.ship-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  border-top: 1px solid rgba(255,255,255,.06);
+  border-left: 1px solid rgba(255,255,255,.06);
+  margin: 0 22px;
+}
+
+.ship-details-grid > div {
+  padding: 14px;
+  border-right: 1px solid rgba(255,255,255,.06);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+
+.ship-details-grid span {
+  display: block;
+  color: #626b77;
+  font-size: 8px;
+  letter-spacing: .8px;
+  margin-bottom: 5px;
+}
+
+.ship-details-grid strong {
+  color: #e4e7eb;
+  font-size: 11px;
+}
+
+.ship-live-location {
+  margin: 18px 22px 22px;
+  padding: 14px;
+  border: 1px solid rgba(255,255,255,.07);
+  background: rgba(255,255,255,.02);
+}
+
+.ship-live-location span {
+  display: block;
+  color: #626b77;
+  font-size: 8px;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+
+.ship-live-location strong {
+  color: #22c55e;
+  font-size: 11px;
+}

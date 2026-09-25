@@ -3,14 +3,139 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
 } from 'react'
 
+import FleetPage from './FleetPage'
+import DispatchPage from './DispatchPage'
+import './DispatchPage.css'
 import './App.css'
-
 import { useFleetSocket } from './hooks/useFleetSocket'
-
 import FleetMap from './FleetMap'
 
+/* ============================================================
+   INCIDENT STORE
+   ============================================================
+
+   Live telemetry se incident create hone ke baad yahan store
+   hota hai.
+
+   Important:
+   - Store React render ke andar mutate nahi hota.
+   - Snapshot stable reference rakhta hai.
+   - Navigation se incidents disappear nahi hote.
+============================================================ */
+
+const incidentStore = {
+  records: new Map(),
+  snapshot: [],
+  listeners: new Set(),
+
+  getSnapshot() {
+    return this.snapshot
+  },
+
+  subscribe(listener) {
+    this.listeners.add(listener)
+
+    return () => {
+      this.listeners.delete(listener)
+    }
+  },
+
+  addOrUpdateIncidents(incidents) {
+    if (
+      !Array.isArray(incidents) ||
+      incidents.length === 0
+    ) {
+      return
+    }
+
+    let changed = false
+
+    incidents.forEach((incident) => {
+      if (!incident?.id) {
+        return
+      }
+
+      const existing =
+        this.records.get(incident.id)
+
+      if (!existing) {
+        this.records.set(
+          incident.id,
+          incident
+        )
+
+        changed = true
+        return
+      }
+
+      const updated = {
+        ...existing,
+        ...incident,
+      }
+
+      const same =
+        existing.type === updated.type &&
+        existing.vessel === updated.vessel &&
+        existing.vesselId === updated.vesselId &&
+        existing.status === updated.status &&
+        existing.destination === updated.destination &&
+        existing.cargo === updated.cargo &&
+        existing.speed === updated.speed &&
+        existing.fuel === updated.fuel &&
+        existing.zoneName === updated.zoneName &&
+        JSON.stringify(existing.position) ===
+          JSON.stringify(updated.position) &&
+        JSON.stringify(existing.zoneBreach) ===
+          JSON.stringify(updated.zoneBreach)
+
+      if (same) {
+        return
+      }
+
+      this.records.set(
+        incident.id,
+        updated
+      )
+
+      changed = true
+    })
+
+    if (!changed) {
+      return
+    }
+
+    this.snapshot = Array.from(
+      this.records.values()
+    )
+
+    this.listeners.forEach(
+      (listener) => {
+        listener()
+      }
+    )
+  },
+}
+
+function useIncidentRecords() {
+  return useSyncExternalStore(
+    incidentStore.subscribe.bind(
+      incidentStore
+    ),
+    incidentStore.getSnapshot.bind(
+      incidentStore
+    ),
+    incidentStore.getSnapshot.bind(
+      incidentStore
+    )
+  )
+}
+
+/* ============================================================
+   APP
+============================================================ */
 
 function App() {
   const [activePage, setActivePage] =
@@ -19,11 +144,16 @@ function App() {
   const [time, setTime] =
     useState(new Date())
 
-  // ==========================================================
-  // RESTRICTED ZONE BREACHES
-  // ==========================================================
-
   const [zoneBreaches, setZoneBreaches] =
+    useState([])
+
+  const [acknowledgedIncidents, setAcknowledgedIncidents] =
+    useState(() => new Set())
+
+  const [dismissedIncidents, setDismissedIncidents] =
+    useState(() => new Set())
+
+  const [incidentHistory, setIncidentHistory] =
     useState([])
 
   const {
@@ -32,33 +162,326 @@ function App() {
     lastUpdate,
   } = useFleetSocket()
 
-
-  // ==========================================================
-  // CLOCK
-  // ==========================================================
+  /* ============================================================
+     CLOCK
+  ============================================================ */
 
   useEffect(() => {
     const timer = setInterval(() => {
       setTime(new Date())
     }, 1000)
 
-    return () => clearInterval(timer)
+    return () => {
+      clearInterval(timer)
+    }
   }, [])
 
-
-  // ==========================================================
-  // RESTRICTED ZONE CALLBACK
-  // ==========================================================
+  /* ============================================================
+     ZONE BREACH CALLBACK
+  ============================================================ */
 
   const handleZoneBreachesChange =
     useCallback((breaches) => {
-      setZoneBreaches(breaches)
+      setZoneBreaches(
+        Array.isArray(breaches)
+          ? breaches
+          : []
+      )
     }, [])
 
+  /* ============================================================
+     CRISIS STATUS
+  ============================================================ */
 
-  // ==========================================================
-  // TIME
-  // ==========================================================
+  const isCrisisStatus = useCallback(
+    (status) => {
+      return (
+        status === 'warning' ||
+        status === 'critical' ||
+        status === 'distress' ||
+        status === 'distressed' ||
+        status === 'insufficient_fuel' ||
+        status === 'stranded'
+      )
+    },
+    []
+  )
+
+  /* ============================================================
+     LIVE STATUS ALERTS
+  ============================================================ */
+
+  const statusAlertShips = useMemo(() => {
+    return ships.filter((ship) =>
+      isCrisisStatus(ship.status)
+    )
+  }, [ships, isCrisisStatus])
+
+  /* ============================================================
+     STATUS ALERT IDS
+  ============================================================ */
+
+  const statusAlertIds = useMemo(() => {
+    return new Set(
+      statusAlertShips.map(
+        (ship, index) =>
+          ship.id ||
+          ship.name ||
+          `ship-${index}`
+      )
+    )
+  }, [statusAlertShips])
+
+  /* ============================================================
+     ZONE-ONLY BREACHES
+  ============================================================ */
+
+  const zoneOnlyBreaches = useMemo(() => {
+    return zoneBreaches.filter(
+      (breach) =>
+        !statusAlertIds.has(
+          breach.shipId
+        )
+    )
+  }, [
+    zoneBreaches,
+    statusAlertIds,
+  ])
+
+  /* ============================================================
+     BREACH LOOKUP
+  ============================================================ */
+
+  const breachByShipId = useMemo(() => {
+    return new Map(
+      zoneBreaches.map((breach) => [
+        breach.shipId,
+        breach,
+      ])
+    )
+  }, [zoneBreaches])
+
+  /* ============================================================
+     CURRENT LIVE INCIDENTS
+  ============================================================ */
+
+  const allIncidents = useMemo(() => {
+    const incidents = []
+
+    /* ----------------------------------------------------------
+       STATUS INCIDENTS
+    ---------------------------------------------------------- */
+
+    statusAlertShips.forEach((ship) => {
+      const shipId =
+        ship.id ||
+        ship.name ||
+        'unknown'
+
+      const zoneBreach =
+        breachByShipId.get(shipId)
+
+      incidents.push({
+        id: `status-${shipId}`,
+
+        type: 'STATUS ALERT',
+
+        vessel:
+          ship.name ||
+          'Unknown Vessel',
+
+        vesselId:
+          ship.id ||
+          'N/A',
+
+        status:
+          ship.status,
+
+        destination:
+          ship.destination,
+
+        cargo:
+          ship.cargo,
+
+        speed:
+          ship.speed_knots,
+
+        fuel:
+          ship.fuel_tons,
+
+        position:
+          ship.position,
+
+        zoneBreach:
+          zoneBreach || null,
+      })
+    })
+
+    /* ----------------------------------------------------------
+       ZONE BREACH INCIDENTS
+    ---------------------------------------------------------- */
+
+    zoneOnlyBreaches.forEach(
+      (breach) => {
+        incidents.push({
+          id: `zone-${breach.shipId}-${breach.zoneName}`,
+
+          type: 'ZONE BREACH',
+
+          vessel:
+            breach.shipName ||
+            'Unknown Vessel',
+
+          vesselId:
+            breach.shipId ||
+            'N/A',
+
+          status: 'active',
+
+          position:
+            breach.position,
+
+          zoneName:
+            breach.zoneName,
+
+          zoneBreach:
+            breach,
+        })
+      }
+    )
+
+    return incidents
+  }, [
+    statusAlertShips,
+    zoneOnlyBreaches,
+    breachByShipId,
+  ])
+
+  /* ============================================================
+     STORE LIVE INCIDENTS
+  ============================================================ */
+
+  useEffect(() => {
+    incidentStore.addOrUpdateIncidents(
+      allIncidents
+    )
+  }, [allIncidents])
+
+  /* ============================================================
+     PERSISTENT INCIDENT RECORDS
+  ============================================================ */
+
+  const incidentRecords =
+    useIncidentRecords()
+
+  /* ============================================================
+     ACTIVE INCIDENTS
+  ============================================================ */
+
+  const activeIncidents = useMemo(() => {
+    return incidentRecords.filter(
+      (incident) =>
+        !dismissedIncidents.has(
+          incident.id
+        )
+    )
+  }, [
+    incidentRecords,
+    dismissedIncidents,
+  ])
+
+  const totalCrisisCount =
+    activeIncidents.length
+
+  /* ============================================================
+     ACKNOWLEDGE INCIDENT
+  ============================================================ */
+
+  const acknowledgeIncident = useCallback(
+    (incident) => {
+      if (
+        acknowledgedIncidents.has(
+          incident.id
+        )
+      ) {
+        return
+      }
+
+      setAcknowledgedIncidents(
+        (previous) => {
+          const next =
+            new Set(previous)
+
+          next.add(
+            incident.id
+          )
+
+          return next
+        }
+      )
+
+      setIncidentHistory(
+        (previous) => [
+          {
+            ...incident,
+            action:
+              'ACKNOWLEDGED',
+            timestamp:
+              new Date(),
+          },
+          ...previous,
+        ]
+      )
+    },
+    [acknowledgedIncidents]
+  )
+
+  /* ============================================================
+     DISMISS INCIDENT
+  ============================================================ */
+
+  const dismissIncident = useCallback(
+    (incident) => {
+      if (
+        dismissedIncidents.has(
+          incident.id
+        )
+      ) {
+        return
+      }
+
+      setDismissedIncidents(
+        (previous) => {
+          const next =
+            new Set(previous)
+
+          next.add(
+            incident.id
+          )
+
+          return next
+        }
+      )
+
+      setIncidentHistory(
+        (previous) => [
+          {
+            ...incident,
+            action:
+              'DISMISSED',
+            timestamp:
+              new Date(),
+          },
+          ...previous,
+        ]
+      )
+    },
+    [dismissedIncidents]
+  )
+
+  /* ============================================================
+     DISPLAY DATA
+  ============================================================ */
 
   const formattedTime =
     time.toLocaleTimeString([], {
@@ -67,184 +490,64 @@ function App() {
       second: '2-digit',
     })
 
-
-  const lastUpdateText = lastUpdate
-    ? lastUpdate.toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      })
-    : '--:--:--'
-
-
-  // ==========================================================
-  // FLEET STATS
-  // ==========================================================
-
-  const activeShips = ships.length
-
-  const normalShips = ships.filter(
-    (ship) => ship.status === 'normal'
-  ).length
-
-
-  // ==========================================================
-  // CRISIS STATUS
-  // ==========================================================
-
-  const isCrisisStatus = (status) =>
-    status === 'warning' ||
-    status === 'critical' ||
-    status === 'distress' ||
-    status === 'distressed' ||
-    status === 'insufficient_fuel' ||
-    status === 'stranded'
-
-
-  const statusCrisisShips = ships.filter(
-    (ship) => isCrisisStatus(ship.status)
-  )
-
-
-  // ==========================================================
-  // PREVENT DOUBLE COUNTING
-  // ==========================================================
-
-  const statusAlertIds = useMemo(
-    () =>
-      new Set(
-        statusCrisisShips.map(
-          (ship) => ship.id || ship.name
+  const lastUpdateText =
+    lastUpdate
+      ? lastUpdate.toLocaleTimeString(
+          [],
+          {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          }
         )
-      ),
-    [statusCrisisShips]
-  )
+      : '--:--:--'
 
+  const activeShips =
+    ships.length
 
-  const uniqueZoneBreaches =
-    zoneBreaches.filter(
-      (breach) =>
-        !statusAlertIds.has(breach.shipId)
-    )
-
-
-  const totalCrisisCount =
-    statusAlertIds.size +
-    uniqueZoneBreaches.length
-
-
-  // ==========================================================
-  // CRISIS VESSELS
-  // ==========================================================
-
-  const crisisVessels = statusCrisisShips
-
-
-  // ==========================================================
-  // STATUS HELPERS
-  // ==========================================================
-
-  const getStatusLabel = (status) => {
-    if (!status) return 'UNKNOWN'
-
-    return status
-      .replace(/_/g, ' ')
-      .toUpperCase()
-  }
-
-
-  const getStatusClass = (status) => {
-    if (status === 'critical') {
-      return 'critical'
-    }
-
-    if (
-      status === 'distress' ||
-      status === 'distressed' ||
-      status === 'stranded' ||
-      status === 'insufficient_fuel'
-    ) {
-      return 'distress'
-    }
-
-    return 'warning'
-  }
-
-
-  const getFuelText = (ship) => {
-    if (typeof ship.fuel_tons === 'number') {
-      return `${ship.fuel_tons.toLocaleString()} t`
-    }
-
-    return 'N/A'
-  }
-
-
-  const getSpeedText = (ship) => {
-    if (typeof ship.speed_knots === 'number') {
-      return `${ship.speed_knots} kn`
-    }
-
-    return 'N/A'
-  }
-
-
-  const getPositionText = (ship) => {
-    if (
-      ship.position &&
-      typeof ship.position.lat === 'number' &&
-      typeof ship.position.lng === 'number'
-    ) {
-      return `${ship.position.lat.toFixed(4)}, ${ship.position.lng.toFixed(4)}`
-    }
-
-    return 'Position unavailable'
-  }
-
-
-  // ==========================================================
-  // DASHBOARD ALERT LIST
-  // ==========================================================
-
-  const dashboardStatusAlerts =
+  const normalShips =
     ships.filter(
-      (ship) => isCrisisStatus(ship.status)
-    )
+      (ship) =>
+        ship.status === 'normal'
+    ).length
 
+  const dashboardIncidents =
+    activeIncidents.slice(0, 3)
 
-  const dashboardZoneAlerts =
-    uniqueZoneBreaches
-
-
-  // ==========================================================
-  // RENDER
-  // ==========================================================
+  /* ============================================================
+     RENDER
+  ============================================================ */
 
   return (
     <div className="app-shell">
 
-      {/* ======================================================
-          SIDEBAR
-      ====================================================== */}
+      {/* ================================================== */}
+      {/* SIDEBAR */}
+      {/* ================================================== */}
 
       <aside className="sidebar">
 
         <div className="logo-area">
+
           <div className="logo-mark">
-            <span>FS</span>
+            <span>FC</span>
           </div>
 
           <div>
-            <h2>FLEETSENTINEL</h2>
-            <p>COMMAND CENTER</p>
-          </div>
-        </div>
+            <h2>
+              FLEET CRISIS
+            </h2>
 
+            <p>
+              COMMAND CENTER
+            </p>
+          </div>
+
+        </div>
 
         <div className="sidebar-label">
           COMMAND
         </div>
-
 
         <nav className="navigation">
 
@@ -254,39 +557,42 @@ function App() {
             ['⚠', 'Crisis Center'],
             ['➤', 'Dispatch'],
             ['◈', 'Analytics'],
-          ].map(([icon, name]) => (
+          ].map(
+            ([icon, name]) => (
+              <button
+                key={name}
+                className={`nav-button ${
+                  activePage === name
+                    ? 'selected'
+                    : ''
+                }`}
+                onClick={() =>
+                  setActivePage(
+                    name
+                  )
+                }
+              >
 
-            <button
-              key={name}
-              className={`nav-button ${
-                activePage === name
-                  ? 'selected'
-                  : ''
-              }`}
-              onClick={() =>
-                setActivePage(name)
-              }
-            >
-
-              <span className="nav-icon">
-                {icon}
-              </span>
-
-              <span>
-                {name}
-              </span>
-
-              {name === 'Crisis Center' && (
-                <span className="nav-alert">
-                  {totalCrisisCount}
+                <span className="nav-icon">
+                  {icon}
                 </span>
-              )}
 
-            </button>
-          ))}
+                <span>
+                  {name}
+                </span>
+
+                {name ===
+                  'Crisis Center' && (
+                  <span className="nav-alert">
+                    {totalCrisisCount}
+                  </span>
+                )}
+
+              </button>
+            )
+          )}
 
         </nav>
-
 
         <div className="sidebar-bottom">
 
@@ -294,11 +600,14 @@ function App() {
 
             <div
               className={`online-dot ${
-                connected ? '' : 'offline'
+                connected
+                  ? ''
+                  : 'offline'
               }`}
-            />
+            ></div>
 
             <div>
+
               <strong>
                 {connected
                   ? 'SYSTEM ONLINE'
@@ -310,10 +619,10 @@ function App() {
                   ? 'Fleet telemetry operational'
                   : 'Waiting for backend'}
               </span>
+
             </div>
 
           </div>
-
 
           <div className="operator">
 
@@ -322,6 +631,7 @@ function App() {
             </div>
 
             <div>
+
               <strong>
                 COMMAND OPERATOR
               </strong>
@@ -329,6 +639,7 @@ function App() {
               <span>
                 Administrator
               </span>
+
             </div>
 
             <span className="more">
@@ -341,23 +652,24 @@ function App() {
 
       </aside>
 
-
-      {/* ======================================================
-          MAIN
-      ====================================================== */}
+      {/* ================================================== */}
+      {/* MAIN */}
+      {/* ================================================== */}
 
       <main className="main-area">
 
-        {/* ====================================================
-            TOP BAR
-        ==================================================== */}
+        {/* ================================================== */}
+        {/* TOPBAR */}
+        {/* ================================================== */}
 
         <header className="topbar">
 
           <div>
 
             <div className="breadcrumb">
-              OPERATIONS <span>/</span> LIVE COMMAND
+              OPERATIONS
+              <span>/</span>
+              LIVE COMMAND
             </div>
 
             <h1>
@@ -365,7 +677,6 @@ function App() {
             </h1>
 
           </div>
-
 
           <div className="topbar-right">
 
@@ -377,14 +688,13 @@ function App() {
                     ? 'online'
                     : 'offline'
                 }`}
-              />
+              ></span>
 
               {connected
                 ? 'FLEET LIVE'
                 : 'CONNECTING...'}
 
             </div>
-
 
             <div className="clock">
 
@@ -395,7 +705,6 @@ function App() {
               {formattedTime}
 
             </div>
-
 
             <div className="notification">
 
@@ -411,734 +720,486 @@ function App() {
 
         </header>
 
+        {/* ================================================== */}
+        {/* CRISIS CENTER */}
+        {/* ================================================== */}
 
-        {/* ====================================================
-            CONTENT
-        ==================================================== */}
+        {activePage === 'Fleet' ? (
 
-        <div className="dashboard-content">
+          <div className="dashboard-content">
+            <FleetPage ships={ships} />
+          </div>
 
+        ) : activePage === 'Dispatch' ? (
 
-          {/* ==================================================
-              CRISIS CENTER
-          ================================================== */}
+          <div className="dashboard-content">
+            <DispatchPage ships={ships} />
+          </div>
 
-          {activePage === 'Crisis Center' ? (
+        ) : activePage === 'Crisis Center' ? (
 
-            <section
-              style={{
-                padding: '4px 0 40px',
-              }}
-            >
+          <div className="dashboard-content">
 
-              {/* CRISIS HEADER */}
+            <section className="hero">
 
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'flex-start',
-                  gap: '24px',
-                  marginBottom: '24px',
-                }}
-              >
+              <div>
+
+                <div className="section-tag">
+                  <span></span>
+                  INCIDENT RESPONSE
+                </div>
+
+                <h2>
+                  Crisis
+                  <br />
+                  <span>
+                    command center.
+                  </span>
+                </h2>
+
+                <p>
+                  Live monitoring and
+                  response management
+                  for active fleet
+                  incidents.
+                </p>
+
+              </div>
+
+              <div className="hero-status">
+
+                <div className="radar">
+                  <div className="radar-ring ring-one"></div>
+                  <div className="radar-ring ring-two"></div>
+                  <div className="radar-ring ring-three"></div>
+                  <div className="radar-center"></div>
+                  <div className="radar-line"></div>
+                </div>
 
                 <div>
 
-                  <div className="section-tag">
-                    <span></span>
-                    INCIDENT RESPONSE
-                  </div>
-
-                  <h2
-                    style={{
-                      marginTop: '12px',
-                      marginBottom: '8px',
-                      fontSize: '32px',
-                    }}
-                  >
-                    Crisis Center
-                  </h2>
-
-                  <p
-                    style={{
-                      margin: 0,
-                      maxWidth: '700px',
-                      lineHeight: '1.6',
-                      opacity: 0.7,
-                    }}
-                  >
-                    Real-time monitoring of vessels requiring
-                    attention across the active fleet.
-                  </p>
-
-                </div>
-
-
-                <div
-                  style={{
-                    minWidth: '190px',
-                    padding: '18px 20px',
-                    borderRadius: '14px',
-                    border:
-                      '1px solid rgba(255,255,255,0.08)',
-                    background:
-                      'rgba(255,255,255,0.03)',
-                  }}
-                >
-
-                  <div
-                    style={{
-                      fontSize: '11px',
-                      letterSpacing: '1.5px',
-                      opacity: 0.55,
-                      marginBottom: '8px',
-                    }}
-                  >
+                  <span>
                     ACTIVE INCIDENTS
-                  </div>
+                  </span>
 
-                  <div
-                    style={{
-                      fontSize: '32px',
-                      fontWeight: 700,
-                      lineHeight: 1,
-                    }}
-                  >
-                    {totalCrisisCount
-                      .toString()
-                      .padStart(2, '0')}
-                  </div>
+                  <strong>
+                    {totalCrisisCount}
+                  </strong>
 
-                  <div
-                    style={{
-                      marginTop: '8px',
-                      fontSize: '12px',
-                      opacity: 0.6,
-                    }}
-                  >
-                    Live fleet alerts
-                  </div>
+                  <small>
+                    Persistent response
+                    queue
+                  </small>
 
                 </div>
 
               </div>
 
+            </section>
 
-              {/* CONNECTION STATUS */}
+            {/* ================================================== */}
+            {/* CRISIS STATS */}
+            {/* ================================================== */}
 
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '20px',
-                  padding: '14px 18px',
-                  marginBottom: '24px',
-                  borderRadius: '12px',
-                  border:
-                    '1px solid rgba(255,255,255,0.07)',
-                  background:
-                    'rgba(255,255,255,0.025)',
-                }}
-              >
+            <section className="stats">
 
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                  }}
-                >
+              <div className="stat-card danger-card">
 
-                  <span
-                    style={{
-                      width: '9px',
-                      height: '9px',
-                      borderRadius: '50%',
-                      display: 'inline-block',
-                      background: connected
-                        ? '#39d98a'
-                        : '#f59e0b',
-                      boxShadow: connected
-                        ? '0 0 10px rgba(57,217,138,0.6)'
-                        : '0 0 10px rgba(245,158,11,0.5)',
-                    }}
-                  />
+                <div className="stat-top">
 
-                  <span
-                    style={{
-                      fontSize: '13px',
-                      fontWeight: 600,
-                    }}
-                  >
-                    {connected
-                      ? 'LIVE TELEMETRY CONNECTED'
-                      : 'WAITING FOR BACKEND CONNECTION'}
+                  <span>
+                    ACTIVE INCIDENTS
+                  </span>
+
+                  <div className="stat-icon red">
+                    ⚠
+                  </div>
+
+                </div>
+
+                <strong>
+                  {totalCrisisCount
+                    .toString()
+                    .padStart(
+                      2,
+                      '0'
+                    )}
+                </strong>
+
+                <div className="stat-footer danger-text">
+
+                  <span>
+                    ● LIVE
                   </span>
 
                 </div>
 
-
-                <span
-                  style={{
-                    fontSize: '12px',
-                    opacity: 0.55,
-                  }}
-                >
-                  Last update: {lastUpdateText}
-                </span>
-
               </div>
 
+              <div className="stat-card">
 
-              {/* =================================================
-                  NO CRISIS
-              ================================================= */}
+                <div className="stat-top">
 
-              {totalCrisisCount === 0 ? (
+                  <span>
+                    ZONE BREACHES
+                  </span>
 
-                <div
-                  style={{
-                    minHeight: '360px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    textAlign: 'center',
-                    borderRadius: '18px',
-                    border:
-                      '1px solid rgba(57,217,138,0.18)',
-                    background:
-                      'linear-gradient(145deg, rgba(57,217,138,0.06), rgba(255,255,255,0.02))',
-                  }}
-                >
-
-                  <div
-                    style={{
-                      width: '72px',
-                      height: '72px',
-                      borderRadius: '50%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '30px',
-                      marginBottom: '18px',
-                      border:
-                        '1px solid rgba(57,217,138,0.3)',
-                      background:
-                        'rgba(57,217,138,0.08)',
-                    }}
-                  >
-                    ✓
+                  <div className="stat-icon red">
+                    !
                   </div>
-
-                  <h2
-                    style={{
-                      margin: '0 0 10px',
-                      fontSize: '24px',
-                    }}
-                  >
-                    ALL SYSTEMS NOMINAL
-                  </h2>
-
-                  <p
-                    style={{
-                      margin: 0,
-                      opacity: 0.6,
-                      fontSize: '14px',
-                    }}
-                  >
-                    No active fleet crises detected.
-                  </p>
-
-                  <p
-                    style={{
-                      margin: '6px 0 0',
-                      opacity: 0.45,
-                      fontSize: '13px',
-                    }}
-                  >
-                    Continuous monitoring is active.
-                  </p>
 
                 </div>
 
-              ) : (
+                <strong>
+                  {zoneBreaches.length}
+                </strong>
 
-                /* =================================================
-                   ACTIVE CRISIS LIST
-                ================================================= */
+                <div className="stat-footer danger-text">
+
+                  <span>
+                    ● MONITORING
+                  </span>
+
+                </div>
+
+              </div>
+
+              <div className="stat-card">
+
+                <div className="stat-top">
+
+                  <span>
+                    ACKNOWLEDGED
+                  </span>
+
+                  <div className="stat-icon green">
+                    ✓
+                  </div>
+
+                </div>
+
+                <strong>
+                  {
+                    acknowledgedIncidents.size
+                  }
+                </strong>
+
+                <div className="stat-footer positive">
+
+                  <span>
+                    ● REVIEWED
+                  </span>
+
+                </div>
+
+              </div>
+
+              <div className="stat-card">
+
+                <div className="stat-top">
+
+                  <span>
+                    HISTORY
+                  </span>
+
+                  <div className="stat-icon purple">
+                    ▣
+                  </div>
+
+                </div>
+
+                <strong>
+                  {incidentHistory.length}
+                </strong>
+
+                <div className="stat-footer positive">
+
+                  <span>
+                    ● LOGGED
+                  </span>
+
+                </div>
+
+              </div>
+
+            </section>
+
+            {/* ================================================== */}
+            {/* INCIDENT GRID */}
+            {/* ================================================== */}
+
+            <section
+              className="bottom-grid"
+              style={{
+                gridTemplateColumns:
+                  'minmax(0, 1.5fr) minmax(300px, 1fr)',
+              }}
+            >
+
+              {/* ACTIVE INCIDENTS */}
+
+              <div className="panel fleet-panel">
+
+                <div className="panel-header">
+
+                  <div>
+
+                    <span className="panel-label">
+                      LIVE RESPONSE
+                    </span>
+
+                    <h3>
+                      Active Incidents
+                    </h3>
+
+                  </div>
+
+                  <span className="crisis-count">
+
+                    {totalCrisisCount
+                      .toString()
+                      .padStart(
+                        2,
+                        '0'
+                      )}{' '}
+                    ACTIVE
+
+                  </span>
+
+                </div>
 
                 <div
                   style={{
+                    padding: '10px',
                     display: 'flex',
-                    flexDirection: 'column',
-                    gap: '16px',
+                    flexDirection:
+                      'column',
+                    gap: '10px',
                   }}
                 >
 
-                  {/* =================================================
-                      NORMAL STATUS CRISIS VESSELS
-                  ================================================= */}
+                  {activeIncidents.length ===
+                    0 && (
+                    <div className="crisis-item normal">
 
-                  {crisisVessels.map(
-                    (ship, index) => {
+                      <div className="crisis-indicator">
+                        ✓
+                      </div>
 
-                      const statusClass =
-                        getStatusClass(
-                          ship.status
+                      <div className="crisis-info">
+
+                        <div className="crisis-title-row">
+
+                          <strong>
+                            No active incidents
+                          </strong>
+
+                          <span>
+                            NOMINAL
+                          </span>
+
+                        </div>
+
+                        <p>
+                          ◉ Continuous fleet
+                          monitoring active
+                        </p>
+
+                      </div>
+
+                    </div>
+                  )}
+
+                  {activeIncidents.map(
+                    (incident) => {
+
+                      const acknowledged =
+                        acknowledgedIncidents.has(
+                          incident.id
                         )
 
-                      const statusLabel =
-                        getStatusLabel(
-                          ship.status
-                        )
-
-                      const matchingBreach =
-                        zoneBreaches.find(
-                          (breach) =>
-                            breach.shipId ===
-                            (ship.id ||
-                              ship.name)
-                        )
+                      const isZone =
+                        incident.type ===
+                        'ZONE BREACH'
 
                       return (
-
                         <div
+                          className={`crisis-item ${
+                            isZone
+                              ? 'critical'
+                              : incident.status
+                          }`}
                           key={
-                            ship.id ||
-                            ship.name ||
-                            `crisis-${index}`
+                            incident.id
                           }
                           style={{
-                            position: 'relative',
-                            overflow: 'hidden',
-                            padding: '22px',
-                            borderRadius: '16px',
-                            border:
-                              statusClass ===
-                              'critical'
-                                ? '1px solid rgba(239,68,68,0.32)'
-                                : '1px solid rgba(245,158,11,0.25)',
-                            background:
-                              statusClass ===
-                              'critical'
-                                ? 'rgba(239,68,68,0.045)'
-                                : 'rgba(245,158,11,0.035)',
+                            display:
+                              'flex',
+                            alignItems:
+                              'flex-start',
+                            gap: '10px',
                           }}
                         >
 
-                          {/* TOP ROW */}
-
-                          <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              gap: '20px',
-                              marginBottom: '20px',
-                            }}
-                          >
-
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '14px',
-                              }}
-                            >
-
-                              <div
-                                style={{
-                                  width: '44px',
-                                  height: '44px',
-                                  flexShrink: 0,
-                                  borderRadius: '12px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontSize: '20px',
-                                  fontWeight: 700,
-                                  background:
-                                    statusClass ===
-                                    'critical'
-                                      ? 'rgba(239,68,68,0.13)'
-                                      : 'rgba(245,158,11,0.13)',
-                                  border:
-                                    statusClass ===
-                                    'critical'
-                                      ? '1px solid rgba(239,68,68,0.25)'
-                                      : '1px solid rgba(245,158,11,0.25)',
-                                }}
-                              >
-                                !
-                              </div>
-
-
-                              <div>
-
-                                <div
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '10px',
-                                    flexWrap: 'wrap',
-                                  }}
-                                >
-
-                                  <h3
-                                    style={{
-                                      margin: 0,
-                                      fontSize: '20px',
-                                    }}
-                                  >
-                                    {ship.name ||
-                                      'Unknown Vessel'}
-                                  </h3>
-
-                                  <span
-                                    style={{
-                                      display:
-                                        'inline-flex',
-                                      alignItems:
-                                        'center',
-                                      padding:
-                                        '5px 9px',
-                                      borderRadius:
-                                        '6px',
-                                      fontSize:
-                                        '10px',
-                                      fontWeight: 700,
-                                      letterSpacing:
-                                        '0.8px',
-                                      background:
-                                        statusClass ===
-                                        'critical'
-                                          ? 'rgba(239,68,68,0.13)'
-                                          : 'rgba(245,158,11,0.13)',
-                                    }}
-                                  >
-                                    {statusLabel}
-                                  </span>
-
-                                </div>
-
-
-                                <div
-                                  style={{
-                                    marginTop: '5px',
-                                    fontSize: '12px',
-                                    opacity: 0.5,
-                                  }}
-                                >
-                                  Vessel ID:{' '}
-                                  {ship.id ||
-                                    'N/A'}
-                                </div>
-
-                              </div>
-
-                            </div>
-
-
-                            <span
-                              style={{
-                                fontSize: '12px',
-                                opacity: 0.5,
-                                whiteSpace:
-                                  'nowrap',
-                              }}
-                            >
-                              LIVE
-                            </span>
-
+                          <div className="crisis-indicator">
+                            !
                           </div>
 
-
-                          {/* DETAILS */}
-
                           <div
+                            className="crisis-info"
                             style={{
-                              display: 'grid',
-                              gridTemplateColumns:
-                                'repeat(4, minmax(0, 1fr))',
-                              gap: '12px',
+                              flex: 1,
                             }}
                           >
 
-                            <div
-                              style={{
-                                padding: '14px',
-                                borderRadius: '10px',
-                                background:
-                                  'rgba(255,255,255,0.025)',
-                                border:
-                                  '1px solid rgba(255,255,255,0.05)',
-                              }}
-                            >
-                              <div
-                                style={{
-                                  fontSize: '10px',
-                                  letterSpacing:
-                                    '1px',
-                                  opacity: 0.45,
-                                  marginBottom:
-                                    '6px',
-                                }}
-                              >
-                                FUEL
-                              </div>
+                            <div className="crisis-title-row">
 
-                              <strong
-                                style={{
-                                  fontSize: '15px',
-                                }}
-                              >
-                                {getFuelText(
-                                  ship
-                                )}
+                              <strong>
+                                {
+                                  incident.vessel
+                                }
                               </strong>
-                            </div>
-
-
-                            <div
-                              style={{
-                                padding: '14px',
-                                borderRadius: '10px',
-                                background:
-                                  'rgba(255,255,255,0.025)',
-                                border:
-                                  '1px solid rgba(255,255,255,0.05)',
-                              }}
-                            >
-                              <div
-                                style={{
-                                  fontSize: '10px',
-                                  letterSpacing:
-                                    '1px',
-                                  opacity: 0.45,
-                                  marginBottom:
-                                    '6px',
-                                }}
-                              >
-                                DESTINATION
-                              </div>
-
-                              <strong
-                                style={{
-                                  fontSize: '15px',
-                                }}
-                              >
-                                {ship.destination ||
-                                  'N/A'}
-                              </strong>
-                            </div>
-
-
-                            <div
-                              style={{
-                                padding: '14px',
-                                borderRadius: '10px',
-                                background:
-                                  'rgba(255,255,255,0.025)',
-                                border:
-                                  '1px solid rgba(255,255,255,0.05)',
-                              }}
-                            >
-                              <div
-                                style={{
-                                  fontSize: '10px',
-                                  letterSpacing:
-                                    '1px',
-                                  opacity: 0.45,
-                                  marginBottom:
-                                    '6px',
-                                }}
-                              >
-                                SPEED
-                              </div>
-
-                              <strong
-                                style={{
-                                  fontSize: '15px',
-                                }}
-                              >
-                                {getSpeedText(
-                                  ship
-                                )}
-                              </strong>
-                            </div>
-
-
-                            <div
-                              style={{
-                                padding: '14px',
-                                borderRadius: '10px',
-                                background:
-                                  'rgba(255,255,255,0.025)',
-                                border:
-                                  '1px solid rgba(255,255,255,0.05)',
-                              }}
-                            >
-                              <div
-                                style={{
-                                  fontSize: '10px',
-                                  letterSpacing:
-                                    '1px',
-                                  opacity: 0.45,
-                                  marginBottom:
-                                    '6px',
-                                }}
-                              >
-                                POSITION
-                              </div>
-
-                              <strong
-                                style={{
-                                  fontSize: '13px',
-                                }}
-                              >
-                                {getPositionText(
-                                  ship
-                                )}
-                              </strong>
-                            </div>
-
-                          </div>
-
-
-                          {/* ZONE BREACH DETAILS */}
-
-                          {matchingBreach && (
-                            <div
-                              style={{
-                                marginTop: '14px',
-                                padding: '12px 14px',
-                                borderRadius: '10px',
-                                background:
-                                  'rgba(239,68,68,0.08)',
-                                border:
-                                  '1px solid rgba(239,68,68,0.2)',
-                              }}
-                            >
-
-                              <div
-                                style={{
-                                  fontSize: '10px',
-                                  letterSpacing:
-                                    '1px',
-                                  color: '#fca5a5',
-                                  marginBottom:
-                                    '5px',
-                                  fontWeight: 700,
-                                }}
-                              >
-                                ⚠ RESTRICTED ZONE BREACH
-                              </div>
-
-                              <div
-                                style={{
-                                  fontSize: '12px',
-                                  color: '#fecaca',
-                                }}
-                              >
-                                Zone:{' '}
-                                <strong>
-                                  {
-                                    matchingBreach.zoneName
-                                  }
-                                </strong>
-                              </div>
-
-                            </div>
-                          )}
-
-
-                          {/* SECONDARY DETAILS */}
-
-                          <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent:
-                                'space-between',
-                              gap: '20px',
-                              marginTop: '14px',
-                              paddingTop: '14px',
-                              borderTop:
-                                '1px solid rgba(255,255,255,0.06)',
-                            }}
-                          >
-
-                            <div
-                              style={{
-                                display: 'flex',
-                                gap: '24px',
-                                flexWrap: 'wrap',
-                                fontSize: '12px',
-                                opacity: 0.6,
-                              }}
-                            >
 
                               <span>
-                                Cargo:{' '}
-                                <strong
-                                  style={{
-                                    opacity: 1,
-                                  }}
-                                >
-                                  {ship.cargo ||
-                                    'N/A'}
-                                </strong>
-                              </span>
-
-                              <span>
-                                Heading:{' '}
-                                <strong
-                                  style={{
-                                    opacity: 1,
-                                  }}
-                                >
-                                  {typeof ship.heading ===
-                                  'number'
-                                    ? `${ship.heading}°`
-                                    : 'N/A'}
-                                </strong>
+                                {isZone
+                                  ? 'ZONE BREACH'
+                                  : String(
+                                      incident.status
+                                    ).toUpperCase()}
                               </span>
 
                             </div>
 
-
-                            <button
-                              onClick={() =>
-                                setActivePage(
-                                  'Fleet'
-                                )
+                            <p>
+                              ◉ ID:{' '}
+                              {
+                                incident.vesselId
                               }
+                            </p>
+
+                            {isZone && (
+                              <p>
+                                ⚠ Restricted
+                                Zone:{' '}
+                                {
+                                  incident.zoneName
+                                }
+                              </p>
+                            )}
+
+                            {!isZone && (
+                              <p>
+                                ◉ Destination:{' '}
+                                {
+                                  incident.destination ||
+                                  'N/A'
+                                }
+                              </p>
+                            )}
+
+                            {incident.position && (
+                              <small>
+                                📍{' '}
+                                {Number(
+                                  incident
+                                    .position
+                                    .lat
+                                ).toFixed(5)}
+                                ,{' '}
+                                {Number(
+                                  incident
+                                    .position
+                                    .lng
+                                ).toFixed(5)}
+                              </small>
+                            )}
+
+                            {acknowledged && (
+                              <small
+                                style={{
+                                  display:
+                                    'block',
+                                  marginTop:
+                                    '5px',
+                                  color:
+                                    '#22c55e',
+                                  fontWeight:
+                                    '700',
+                                }}
+                              >
+                                ✓ ACKNOWLEDGED
+                              </small>
+                            )}
+
+                            <div
                               style={{
-                                border:
-                                  '1px solid rgba(255,255,255,0.1)',
-                                background:
-                                  'rgba(255,255,255,0.04)',
-                                borderRadius:
-                                  '8px',
-                                padding:
-                                  '9px 14px',
-                                cursor:
-                                  'pointer',
-                                color:
-                                  'inherit',
-                                fontSize:
-                                  '11px',
-                                fontWeight:
-                                  600,
-                                letterSpacing:
-                                  '0.5px',
+                                display:
+                                  'flex',
+                                gap: '6px',
+                                marginTop:
+                                  '9px',
                               }}
                             >
-                              VIEW FLEET →
-                            </button>
+
+                              {!acknowledged && (
+                                <button
+                                  onClick={() =>
+                                    acknowledgeIncident(
+                                      incident
+                                    )
+                                  }
+                                  style={{
+                                    border:
+                                      '1px solid #22c55e',
+                                    background:
+                                      'rgba(34,197,94,.12)',
+                                    color:
+                                      '#22c55e',
+                                    borderRadius:
+                                      '4px',
+                                    padding:
+                                      '5px 8px',
+                                    fontSize:
+                                      '9px',
+                                    fontWeight:
+                                      '700',
+                                    cursor:
+                                      'pointer',
+                                  }}
+                                >
+                                  ACKNOWLEDGE
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() =>
+                                  dismissIncident(
+                                    incident
+                                  )
+                                }
+                                style={{
+                                  border:
+                                    '1px solid #6b7280',
+                                  background:
+                                    'transparent',
+                                  color:
+                                    '#9ca3af',
+                                  borderRadius:
+                                    '4px',
+                                  padding:
+                                    '5px 8px',
+                                  fontSize:
+                                    '9px',
+                                  fontWeight:
+                                    '700',
+                                  cursor:
+                                    'pointer',
+                                }}
+                              >
+                                DISMISS
+                              </button>
+
+                            </div>
 
                           </div>
 
@@ -1147,768 +1208,460 @@ function App() {
                     }
                   )}
 
+                </div>
 
-                  {/* =================================================
-                      RESTRICTED ZONE BREACHES
-                  ================================================= */}
+              </div>
 
-                  {uniqueZoneBreaches.map(
-                    (breach) => (
+              {/* INCIDENT HISTORY */}
 
-                      <div
-                        key={`zone-${breach.shipId}`}
-                        style={{
-                          position: 'relative',
-                          overflow: 'hidden',
-                          padding: '22px',
-                          borderRadius: '16px',
-                          border:
-                            '1px solid rgba(239,68,68,0.35)',
-                          background:
-                            'rgba(239,68,68,0.055)',
-                        }}
-                      >
+              <div className="panel response-panel">
 
-                        {/* TOP */}
+                <div className="panel-header">
 
+                  <div>
+
+                    <span className="panel-label">
+                      AUDIT TRAIL
+                    </span>
+
+                    <h3>
+                      Incident History
+                    </h3>
+
+                  </div>
+
+                </div>
+
+                <div
+                  style={{
+                    padding: '12px',
+                    maxHeight:
+                      '420px',
+                    overflowY:
+                      'auto',
+                  }}
+                >
+
+                  {incidentHistory.length ===
+                  0 ? (
+                    <div
+                      style={{
+                        padding:
+                          '25px 10px',
+                        textAlign:
+                          'center',
+                        color:
+                          '#6b7280',
+                        fontSize:
+                          '11px',
+                      }}
+                    >
+                      No response
+                      actions
+                      recorded yet.
+                    </div>
+                  ) : (
+                    incidentHistory.map(
+                      (
+                        item,
+                        index
+                      ) => (
                         <div
+                          key={`${item.id}-${index}`}
                           style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent:
-                              'space-between',
-                            gap: '20px',
-                            marginBottom:
-                              '18px',
-                          }}
-                        >
-
-                          <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '14px',
-                            }}
-                          >
-
-                            <div
-                              style={{
-                                width: '44px',
-                                height: '44px',
-                                flexShrink: 0,
-                                borderRadius:
-                                  '12px',
-                                display:
-                                  'flex',
-                                alignItems:
-                                  'center',
-                                justifyContent:
-                                  'center',
-                                fontSize:
-                                  '20px',
-                                fontWeight: 700,
-                                color:
-                                  '#fecaca',
-                                background:
-                                  'rgba(239,68,68,0.15)',
-                                border:
-                                  '1px solid rgba(239,68,68,0.3)',
-                              }}
-                            >
-                              !
-                            </div>
-
-
-                            <div>
-
-                              <div
-                                style={{
-                                  display:
-                                    'flex',
-                                  alignItems:
-                                    'center',
-                                  gap: '10px',
-                                  flexWrap:
-                                    'wrap',
-                                }}
-                              >
-
-                                <h3
-                                  style={{
-                                    margin: 0,
-                                    fontSize:
-                                      '20px',
-                                  }}
-                                >
-                                  {breach.shipName}
-                                </h3>
-
-                                <span
-                                  style={{
-                                    display:
-                                      'inline-flex',
-                                    alignItems:
-                                      'center',
-                                    padding:
-                                      '5px 9px',
-                                    borderRadius:
-                                      '6px',
-                                    fontSize:
-                                      '10px',
-                                    fontWeight:
-                                      700,
-                                    letterSpacing:
-                                      '0.8px',
-                                    color:
-                                      '#fecaca',
-                                    background:
-                                      'rgba(239,68,68,0.15)',
-                                  }}
-                                >
-                                  ZONE BREACH
-                                </span>
-
-                              </div>
-
-
-                              <div
-                                style={{
-                                  marginTop:
-                                    '5px',
-                                  fontSize:
-                                    '12px',
-                                  opacity:
-                                    0.55,
-                                }}
-                              >
-                                Vessel ID:{' '}
-                                {breach.shipId ||
-                                  'N/A'}
-                              </div>
-
-                            </div>
-
-                          </div>
-
-
-                          <span
-                            style={{
-                              padding:
-                                '5px 9px',
-                              borderRadius:
-                                '6px',
-                              fontSize:
-                                '10px',
-                              fontWeight:
-                                700,
-                              color:
-                                '#fecaca',
-                              background:
-                                'rgba(239,68,68,0.13)',
-                            }}
-                          >
-                            ACTIVE
-                          </span>
-
-                        </div>
-
-
-                        {/* BREACH INFORMATION */}
-
-                        <div
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns:
-                              'repeat(3, minmax(0, 1fr))',
-                            gap: '12px',
-                          }}
-                        >
-
-                          <div
-                            style={{
-                              padding: '14px',
-                              borderRadius:
-                                '10px',
-                              background:
-                                'rgba(255,255,255,0.025)',
-                              border:
-                                '1px solid rgba(255,255,255,0.05)',
-                            }}
-                          >
-
-                            <div
-                              style={{
-                                fontSize:
-                                  '10px',
-                                letterSpacing:
-                                  '1px',
-                                opacity:
-                                  0.45,
-                                marginBottom:
-                                  '6px',
-                              }}
-                            >
-                              RESTRICTED ZONE
-                            </div>
-
-                            <strong
-                              style={{
-                                fontSize:
-                                  '14px',
-                              }}
-                            >
-                              {breach.zoneName}
-                            </strong>
-
-                          </div>
-
-
-                          <div
-                            style={{
-                              padding: '14px',
-                              borderRadius:
-                                '10px',
-                              background:
-                                'rgba(255,255,255,0.025)',
-                              border:
-                                '1px solid rgba(255,255,255,0.05)',
-                            }}
-                          >
-
-                            <div
-                              style={{
-                                fontSize:
-                                  '10px',
-                                letterSpacing:
-                                  '1px',
-                                opacity:
-                                  0.45,
-                                marginBottom:
-                                  '6px',
-                              }}
-                            >
-                              POSITION
-                            </div>
-
-                            <strong
-                              style={{
-                                fontSize:
-                                  '13px',
-                              }}
-                            >
-                              {Number(
-                                breach.position.lat
-                              ).toFixed(5)}
-                              ,{' '}
-                              {Number(
-                                breach.position.lng
-                              ).toFixed(5)}
-                            </strong>
-
-                          </div>
-
-
-                          <div
-                            style={{
-                              padding: '14px',
-                              borderRadius:
-                                '10px',
-                              background:
-                                'rgba(255,255,255,0.025)',
-                              border:
-                                '1px solid rgba(255,255,255,0.05)',
-                            }}
-                          >
-
-                            <div
-                              style={{
-                                fontSize:
-                                  '10px',
-                                letterSpacing:
-                                  '1px',
-                                opacity:
-                                  0.45,
-                                marginBottom:
-                                  '6px',
-                              }}
-                            >
-                              INCIDENT STATUS
-                            </div>
-
-                            <strong
-                              style={{
-                                fontSize:
-                                  '14px',
-                                color:
-                                  '#fca5a5',
-                              }}
-                            >
-                              ACTIVE
-                            </strong>
-
-                          </div>
-
-                        </div>
-
-
-                        {/* WARNING */}
-
-                        <div
-                          style={{
-                            marginTop:
-                              '14px',
                             padding:
-                              '12px 14px',
-                            borderRadius:
-                              '10px',
-                            background:
-                              'rgba(239,68,68,0.08)',
-                            border:
-                              '1px solid rgba(239,68,68,0.18)',
-                            fontSize:
-                              '12px',
-                            color:
-                              '#fecaca',
+                              '10px 0',
+                            borderBottom:
+                              '1px solid rgba(255,255,255,.06)',
                           }}
                         >
-                          ⚠ Vessel has entered a restricted
-                          operational zone.
-                        </div>
 
-                      </div>
+                          <strong
+                            style={{
+                              display:
+                                'block',
+                              fontSize:
+                                '11px',
+                            }}
+                          >
+                            {
+                              item.vessel
+                            }
+                          </strong>
+
+                          <small
+                            style={{
+                              display:
+                                'block',
+                              color:
+                                '#9ca3af',
+                              marginTop:
+                                '3px',
+                            }}
+                          >
+                            {
+                              item.action
+                            }{' '}
+                            ·{' '}
+                            {
+                              item.type
+                            }
+                          </small>
+
+                          <small
+                            style={{
+                              display:
+                                'block',
+                              color:
+                                '#6b7280',
+                              marginTop:
+                                '3px',
+                            }}
+                          >
+                            {new Date(
+                              item.timestamp
+                            ).toLocaleTimeString(
+                              [],
+                              {
+                                hour:
+                                  '2-digit',
+                                minute:
+                                  '2-digit',
+                                second:
+                                  '2-digit',
+                              }
+                            )}
+                          </small>
+
+                        </div>
+                      )
                     )
                   )}
 
                 </div>
-              )}
+
+              </div>
 
             </section>
 
-          ) : (
+          </div>
 
-            /* ==================================================
-               DASHBOARD
-            ================================================== */
+        ) : (
 
-            <>
+          /* ================================================== */
+          /* DASHBOARD */
+          /* ================================================== */
 
-              {/* =================================================
-                  HERO
-              ================================================= */}
+          <div className="dashboard-content">
 
-              <section className="hero">
+            {/* HERO */}
+
+            <section className="hero">
+
+              <div>
+
+                <div className="section-tag">
+                  <span></span>
+                  COMMAND OVERVIEW
+                </div>
+
+                <h2>
+                  Fleet situation
+                  <br />
+                  <span>
+                    at a glance.
+                  </span>
+                </h2>
+
+                <p>
+                  Real-time visibility
+                  across commercial
+                  vessels, operational
+                  alerts, and crisis
+                  response operations
+                  in the Strait of
+                  Hormuz.
+                </p>
+
+              </div>
+
+              <div className="hero-status">
+
+                <div className="radar">
+                  <div className="radar-ring ring-one"></div>
+                  <div className="radar-ring ring-two"></div>
+                  <div className="radar-ring ring-three"></div>
+                  <div className="radar-center"></div>
+                  <div className="radar-line"></div>
+                </div>
 
                 <div>
 
-                  <div className="section-tag">
-                    <span></span>
-                    COMMAND OVERVIEW
-                  </div>
+                  <span>
+                    NETWORK STATUS
+                  </span>
 
-                  <h2>
-                    Fleet situation
-                    <br />
-                    <span>at a glance.</span>
-                  </h2>
+                  <strong>
+                    {connected
+                      ? 'OPERATIONAL'
+                      : 'CONNECTING'}
+                  </strong>
 
-                  <p>
-                    Real-time visibility across commercial vessels,
-                    operational alerts, and crisis response operations
-                    in the Strait of Hormuz.
-                  </p>
+                  <small>
+                    Last update:{' '}
+                    {lastUpdateText}
+                  </small>
 
                 </div>
 
+              </div>
 
-                <div className="hero-status">
+            </section>
 
-                  <div className="radar">
-                    <div className="radar-ring ring-one"></div>
-                    <div className="radar-ring ring-two"></div>
-                    <div className="radar-ring ring-three"></div>
-                    <div className="radar-center"></div>
-                    <div className="radar-line"></div>
+            {/* STATS */}
+
+            <section className="stats">
+
+              <div className="stat-card">
+
+                <div className="stat-top">
+
+                  <span>
+                    ACTIVE VESSELS
+                  </span>
+
+                  <div className="stat-icon blue">
+                    ▦
                   </div>
+
+                </div>
+
+                <strong>
+                  {activeShips
+                    .toString()
+                    .padStart(
+                      2,
+                      '0'
+                    )}
+                </strong>
+
+                <div className="stat-footer positive">
+
+                  <span>
+                    ● LIVE
+                  </span>
+
+                  <small>
+                    active vessels
+                  </small>
+
+                </div>
+
+              </div>
+
+              <div className="stat-card">
+
+                <div className="stat-top">
+
+                  <span>
+                    TRACKED SHIPS
+                  </span>
+
+                  <div className="stat-icon purple">
+                    ▣
+                  </div>
+
+                </div>
+
+                <strong>
+                  {activeShips}
+                </strong>
+
+                <div className="stat-footer positive">
+
+                  <span>
+                    ● SYNCHRONIZED
+                  </span>
+
+                  <small>
+                    real-time
+                    tracking
+                  </small>
+
+                </div>
+
+              </div>
+
+              <div className="stat-card danger-card">
+
+                <div className="stat-top">
+
+                  <span>
+                    ACTIVE ALERTS
+                  </span>
+
+                  <div className="stat-icon red">
+                    ⚠
+                  </div>
+
+                </div>
+
+                <strong>
+                  {totalCrisisCount
+                    .toString()
+                    .padStart(
+                      2,
+                      '0'
+                    )}
+                </strong>
+
+                <div className="stat-footer danger-text">
+
+                  <span>
+                    ● LIVE ALERTS
+                  </span>
+
+                </div>
+
+              </div>
+
+              <div className="stat-card">
+
+                <div className="stat-top">
+
+                  <span>
+                    NORMAL VESSELS
+                  </span>
+
+                  <div className="stat-icon green">
+                    ✓
+                  </div>
+
+                </div>
+
+                <strong>
+                  {normalShips}
+                </strong>
+
+                <div className="availability">
+
+                  <div>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+
+                  <small>
+                    operating normally
+                  </small>
+
+                </div>
+
+              </div>
+
+            </section>
+
+            {/* MAIN GRID */}
+
+            <section className="main-grid">
+
+              {/* MAP */}
+
+              <div className="panel map-panel">
+
+                <div className="panel-header">
 
                   <div>
 
-                    <span>
-                      NETWORK STATUS
+                    <span className="panel-label">
+                      LIVE OPERATIONS
                     </span>
 
-                    <strong>
-                      {connected
-                        ? 'OPERATIONAL'
-                        : 'CONNECTING'}
-                    </strong>
-
-                    <small>
-                      Last update: {lastUpdateText}
-                    </small>
+                    <h3>
+                      Fleet Deployment
+                      Map
+                    </h3>
 
                   </div>
+
+                  <button className="panel-action">
+                    EXPAND ↗
+                  </button>
 
                 </div>
 
-              </section>
+                <div
+                  style={{
+                    height:
+                      '420px',
+                    width:
+                      '100%',
+                  }}
+                >
 
-
-              {/* =================================================
-                  STATS
-              ================================================= */}
-
-              <section className="stats">
-
-                <div className="stat-card">
-
-                  <div className="stat-top">
-                    <span>ACTIVE VESSELS</span>
-                    <div className="stat-icon blue">
-                      ▦
-                    </div>
-                  </div>
-
-                  <strong>
-                    {activeShips
-                      .toString()
-                      .padStart(2, '0')}
-                  </strong>
-
-                  <div className="stat-footer positive">
-                    <span>● LIVE</span>
-                    <small>active vessels</small>
-                  </div>
+                  <FleetMap
+                    ships={ships}
+                    onZoneBreachesChange={
+                      handleZoneBreachesChange
+                    }
+                  />
 
                 </div>
 
+              </div>
 
-                <div className="stat-card">
+              {/* FLEET ALERTS */}
 
-                  <div className="stat-top">
-                    <span>TRACKED SHIPS</span>
+              <div className="panel crisis-panel">
 
-                    <div className="stat-icon purple">
-                      ▣
-                    </div>
+                <div className="panel-header">
+
+                  <div>
+
+                    <span className="panel-label">
+                      INCIDENT RESPONSE
+                    </span>
+
+                    <h3>
+                      Fleet Alerts
+                    </h3>
+
                   </div>
 
-                  <strong>
-                    {activeShips}
-                  </strong>
+                  <span className="crisis-count">
 
-                  <div className="stat-footer positive">
-                    <span>● SYNCHRONIZED</span>
-                    <small>real-time tracking</small>
-                  </div>
-
-                </div>
-
-
-                <div className="stat-card danger-card">
-
-                  <div className="stat-top">
-                    <span>ACTIVE ALERTS</span>
-
-                    <div className="stat-icon red">
-                      ⚠
-                    </div>
-                  </div>
-
-                  <strong>
                     {totalCrisisCount
                       .toString()
-                      .padStart(2, '0')}
-                  </strong>
+                      .padStart(
+                        2,
+                        '0'
+                      )}{' '}
+                    ACTIVE
 
-                  <div className="stat-footer danger-text">
-                    <span>● LIVE ALERTS</span>
-                  </div>
-
-                </div>
-
-
-                <div className="stat-card">
-
-                  <div className="stat-top">
-                    <span>NORMAL VESSELS</span>
-
-                    <div className="stat-icon green">
-                      ✓
-                    </div>
-                  </div>
-
-                  <strong>
-                    {normalShips}
-                  </strong>
-
-                  <div className="availability">
-
-                    <div>
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                    </div>
-
-                    <small>
-                      operating normally
-                    </small>
-
-                  </div>
+                  </span>
 
                 </div>
 
-              </section>
-
-
-              {/* =================================================
-                  MAIN GRID
-              ================================================= */}
-
-              <section className="main-grid">
-
-                {/* =================================================
-                    LIVE MAP
-                ================================================= */}
-
-                <div className="panel map-panel">
-
-                  <div className="panel-header">
-
-                    <div>
-
-                      <span className="panel-label">
-                        LIVE OPERATIONS
-                      </span>
-
-                      <h3>
-                        Fleet Deployment Map
-                      </h3>
-
-                    </div>
-
-                    <button className="panel-action">
-                      EXPAND ↗
-                    </button>
-
-                  </div>
-
-
-                  <div
-                    className="map"
-                    style={{
-                      position: 'relative',
-                      overflow: 'hidden',
-                    }}
-                  >
-
-                    <FleetMap
-                      ships={ships}
-                      onZoneBreachesChange={
-                        handleZoneBreachesChange
-                      }
-                    />
-
-
-                    <div className="map-legend">
-
-                      <span>
-                        <i className="green-dot"></i>
-                        Normal
-                      </span>
-
-                      <span>
-                        <i className="blue-dot"></i>
-                        Tracked
-                      </span>
-
-                      <span>
-                        <i className="red-dot"></i>
-                        Alert
-                      </span>
-
-                    </div>
-
-                  </div>
-
-                </div>
-
-
-                {/* =================================================
-                    CRISIS PANEL
-                ================================================= */}
-
-                <div className="panel crisis-panel">
-
-                  <div className="panel-header">
-
-                    <div>
-
-                      <span className="panel-label">
-                        INCIDENT RESPONSE
-                      </span>
-
-                      <h3>
-                        Fleet Alerts
-                      </h3>
-
-                    </div>
-
-                    <span className="crisis-count">
-                      {totalCrisisCount
-                        .toString()
-                        .padStart(2, '0')} ACTIVE
-                    </span>
-
-                  </div>
-
-
-                  <div className="crisis-list">
-
-                    {/* STATUS ALERTS */}
-
-                    {dashboardStatusAlerts
-                      .slice(0, 3)
-                      .map((ship, index) => (
-
-                        <div
-                          className={`crisis-item ${
-                            ship.status
-                          }`}
-                          key={
-                            ship.id ||
-                            ship.name ||
-                            `alert-${index}`
-                          }
-                        >
-
-                          <div className="crisis-indicator">
-                            !
-                          </div>
-
-                          <div className="crisis-info">
-
-                            <div className="crisis-title-row">
-
-                              <strong>
-                                {ship.name}
-                              </strong>
-
-                              <span>
-                                {getStatusLabel(
-                                  ship.status
-                                )}
-                              </span>
-
-                            </div>
-
-                            <p>
-                              ◉ Destination:{' '}
-                              {ship.destination}
-                            </p>
-
-                            <small>
-                              {ship.cargo} ·{' '}
-                              {ship.speed_knots} kn
-                            </small>
-
-                          </div>
-
-                          <button
-                            className="arrow-button"
-                            onClick={() =>
-                              setActivePage(
-                                'Crisis Center'
-                              )
-                            }
-                          >
-                            →
-                          </button>
-
-                        </div>
-                      ))}
-
-
-                    {/* ZONE BREACH ALERTS */}
-
-                    {dashboardZoneAlerts
-                      .slice(
-                        0,
-                        Math.max(
-                          0,
-                          3 -
-                            dashboardStatusAlerts
-                              .slice(0, 3)
-                              .length
-                        )
-                      )
-                      .map((breach) => (
-
-                        <div
-                          className="crisis-item critical"
-                          key={`zone-${breach.shipId}`}
-                        >
-
-                          <div className="crisis-indicator">
-                            !
-                          </div>
-
-                          <div className="crisis-info">
-
-                            <div className="crisis-title-row">
-
-                              <strong>
-                                {breach.shipName}
-                              </strong>
-
-                              <span>
-                                ZONE BREACH
-                              </span>
-
-                            </div>
-
-                            <p>
-                              ⚠ Restricted Zone:{' '}
-                              {breach.zoneName}
-                            </p>
-
-                            <small>
-                              Position:{' '}
-                              {Number(
-                                breach.position.lat
-                              ).toFixed(4)}
-                              ,{' '}
-                              {Number(
-                                breach.position.lng
-                              ).toFixed(4)}
-                            </small>
-
-                          </div>
-
-                          <button
-                            className="arrow-button"
-                            onClick={() =>
-                              setActivePage(
-                                'Crisis Center'
-                              )
-                            }
-                          >
-                            →
-                          </button>
-
-                        </div>
-                      ))}
-
-
-                    {/* NO ALERT */}
-
-                    {totalCrisisCount === 0 && (
-
-                      <div className="crisis-item normal">
+                <div className="crisis-list">
+
+                  {dashboardIncidents.map(
+                    (incident) => (
+                      <div
+                        className={`crisis-item ${
+                          incident.type ===
+                          'ZONE BREACH'
+                            ? 'critical'
+                            : incident.status
+                        }`}
+                        key={
+                          incident.id
+                        }
+                      >
 
                         <div className="crisis-indicator">
-                          ✓
+                          !
                         </div>
 
                         <div className="crisis-info">
@@ -1916,108 +1669,184 @@ function App() {
                           <div className="crisis-title-row">
 
                             <strong>
-                              All vessels normal
+                              {
+                                incident.vessel
+                              }
                             </strong>
 
                             <span>
-                              NOMINAL
+                              {incident.type ===
+                              'ZONE BREACH'
+                                ? 'ZONE BREACH'
+                                : String(
+                                    incident.status
+                                  ).toUpperCase()}
                             </span>
 
                           </div>
 
                           <p>
-                            ◉ No active fleet alerts
+                            ◉ ID:{' '}
+                            {
+                              incident.vesselId
+                            }
                           </p>
 
                           <small>
-                            Continuous monitoring active
+                            {incident.type ===
+                            'ZONE BREACH'
+                              ? `Restricted Zone: ${incident.zoneName}`
+                              : `Destination: ${
+                                  incident.destination ||
+                                  'N/A'
+                                }`}
                           </small>
 
                         </div>
 
+                        <button
+                          className="arrow-button"
+                          onClick={() =>
+                            setActivePage(
+                              'Crisis Center'
+                            )
+                          }
+                        >
+                          →
+                        </button>
+
+                      </div>
+                    )
+                  )}
+
+                  {totalCrisisCount ===
+                    0 && (
+                    <div className="crisis-item normal">
+
+                      <div className="crisis-indicator">
+                        ✓
                       </div>
 
-                    )}
+                      <div className="crisis-info">
+
+                        <div className="crisis-title-row">
+
+                          <strong>
+                            All vessels
+                            normal
+                          </strong>
+
+                          <span>
+                            NOMINAL
+                          </span>
+
+                        </div>
+
+                        <p>
+                          ◉ No active
+                          fleet alerts
+                        </p>
+
+                        <small>
+                          Continuous
+                          monitoring
+                          active
+                        </small>
+
+                      </div>
+
+                    </div>
+                  )}
+
+                </div>
+
+                <button
+                  className="view-all"
+                  onClick={() =>
+                    setActivePage(
+                      'Crisis Center'
+                    )
+                  }
+                >
+                  VIEW ALL ALERTS
+                  <span>
+                    →
+                  </span>
+                </button>
+
+              </div>
+
+            </section>
+
+            {/* BOTTOM GRID */}
+
+            <section className="bottom-grid">
+
+              {/* FLEET STATUS */}
+
+              <div className="panel fleet-panel">
+
+                <div className="panel-header">
+
+                  <div>
+
+                    <span className="panel-label">
+                      VESSEL MONITORING
+                    </span>
+
+                    <h3>
+                      Fleet Status
+                    </h3>
 
                   </div>
 
-
                   <button
-                    className="view-all"
+                    className="panel-action"
                     onClick={() =>
                       setActivePage(
-                        'Crisis Center'
+                        'Fleet'
                       )
                     }
                   >
-                    VIEW ALL ALERTS
-                    <span>→</span>
+                    VIEW FLEET →
                   </button>
 
                 </div>
 
-              </section>
+                <div className="fleet-table">
 
+                  <div className="table-head">
 
-              {/* =================================================
-                  BOTTOM GRID
-              ================================================= */}
+                    <span>
+                      VESSEL
+                    </span>
 
-              <section className="bottom-grid">
+                    <span>
+                      CARGO
+                    </span>
 
-                {/* =================================================
-                    FLEET STATUS
-                ================================================= */}
+                    <span>
+                      DESTINATION
+                    </span>
 
-                <div className="panel fleet-panel">
+                    <span>
+                      STATUS
+                    </span>
 
-                  <div className="panel-header">
-
-                    <div>
-
-                      <span className="panel-label">
-                        VESSEL MONITORING
-                      </span>
-
-                      <h3>
-                        Fleet Status
-                      </h3>
-
-                    </div>
-
-                    <button
-                      className="panel-action"
-                      onClick={() =>
-                        setActivePage('Fleet')
-                      }
-                    >
-                      VIEW FLEET →
-                    </button>
+                    <span>
+                      FUEL
+                    </span>
 
                   </div>
 
-
-                  <div className="fleet-table">
-
-                    <div className="table-head">
-                      <span>VESSEL</span>
-                      <span>CARGO</span>
-                      <span>DESTINATION</span>
-                      <span>STATUS</span>
-                      <span>FUEL</span>
-                    </div>
-
-
-                    {ships
-                      .slice(0, 6)
-                      .map((ship, index) => (
-
+                  {ships
+                    .slice(0, 6)
+                    .map(
+                      (ship) => (
                         <div
                           className="fleet-row"
                           key={
-                            ship.id ||
-                            ship.name ||
-                            `fleet-${index}`
+                            ship.id
                           }
                         >
 
@@ -2030,21 +1859,21 @@ function App() {
                           </span>
 
                           <span>
-                            → {ship.destination}
+                            →{' '}
+                            {
+                              ship.destination
+                            }
                           </span>
 
                           <span
-                            className={`unit-status ${
-                              ship.status
-                            }`}
+                            className={`unit-status ${ship.status}`}
                           >
+
                             <i></i>
 
-                            {getStatusLabel(
-                              ship.status
-                            )}
-                          </span>
+                            {ship.status.toUpperCase()}
 
+                          </span>
 
                           <div className="battery">
 
@@ -2053,9 +1882,7 @@ function App() {
                               <span
                                 style={{
                                   width: `${Math.min(
-                                    ((ship.fuel_tons ||
-                                      0) /
-                                      100) *
+                                    ship.fuel_tons /
                                       100,
                                     100
                                   )}%`,
@@ -2065,182 +1892,183 @@ function App() {
                             </div>
 
                             <small>
-
-                              {typeof ship.fuel_tons ===
-                              'number'
-                                ? ship.fuel_tons.toLocaleString()
-                                : 'N/A'}
-
-                              {typeof ship.fuel_tons ===
-                              'number'
-                                ? ' t'
-                                : ''}
-
+                              {ship.fuel_tons.toLocaleString()}{' '}
+                              t
                             </small>
 
                           </div>
 
                         </div>
-
-                      ))}
-
-
-                    {ships.length === 0 && (
-
-                      <div className="fleet-row">
-
-                        <span>
-                          Waiting for fleet telemetry...
-                        </span>
-
-                      </div>
-
+                      )
                     )}
 
+                  {ships.length ===
+                    0 && (
+                    <div className="fleet-row">
+
+                      <span>
+                        Waiting for
+                        fleet
+                        telemetry...
+                      </span>
+
+                    </div>
+                  )}
+
+                </div>
+
+              </div>
+
+              {/* FLEET COMMAND */}
+
+              <div className="panel response-panel">
+
+                <div className="panel-header">
+
+                  <div>
+
+                    <span className="panel-label">
+                      FLEET OPERATIONS
+                    </span>
+
+                    <h3>
+                      Fleet Command
+                    </h3>
+
+                  </div>
+
+                  <div className="dispatch-live">
+                    ● LIVE
                   </div>
 
                 </div>
 
+                <div className="dispatch-route">
 
-                {/* =================================================
-                    RESPONSE
-                ================================================= */}
-
-                <div className="panel response-panel">
-
-                  <div className="panel-header">
-
-                    <div>
-
-                      <span className="panel-label">
-                        FLEET OPERATIONS
-                      </span>
-
-                      <h3>
-                        Fleet Command
-                      </h3>
-
-                    </div>
-
-                    <div className="dispatch-live">
-                      ● LIVE
-                    </div>
-
-                  </div>
-
-
-                  <div className="dispatch-route">
-
-                    {ships.length > 0 ? (
-
-                      <>
-
-                        <div className="dispatch-node">
-
-                          <div className="node-icon">
-                            ◉
-                          </div>
-
-                          <div>
-
-                            <span>
-                              LEAD VESSEL
-                            </span>
-
-                            <strong>
-                              {ships[0].name}
-                            </strong>
-
-                            <small>
-                              {ships[0].cargo} ·{' '}
-                              {ships[0].speed_knots} kn
-                            </small>
-
-                          </div>
-
-                        </div>
-
-
-                        <div className="route-line">
-                          <span>LIVE</span>
-                        </div>
-
-
-                        <div className="dispatch-node">
-
-                          <div className="node-icon vehicle">
-                            →
-                          </div>
-
-                          <div>
-
-                            <span>
-                              DESTINATION
-                            </span>
-
-                            <strong>
-                              {ships[0].destination}
-                            </strong>
-
-                            <small>
-                              Heading{' '}
-                              {ships[0].heading}°
-                            </small>
-
-                          </div>
-
-                        </div>
-
-                      </>
-
-                    ) : (
-
+                  {ships.length >
+                  0 ? (
+                    <>
                       <div className="dispatch-node">
+
+                        <div className="node-icon">
+                          ◉
+                        </div>
 
                         <div>
 
                           <span>
-                            FLEET STATUS
+                            LEAD VESSEL
                           </span>
 
                           <strong>
-                            Waiting for telemetry...
+                            {
+                              ships[0]
+                                .name
+                            }
                           </strong>
+
+                          <small>
+                            {
+                              ships[0]
+                                .cargo
+                            }{' '}
+                            ·{' '}
+                            {
+                              ships[0]
+                                .speed_knots
+                            }{' '}
+                            kn
+                          </small>
 
                         </div>
 
                       </div>
 
-                    )}
+                      <div className="route-line">
 
-                  </div>
+                        <span>
+                          LIVE
+                        </span>
 
+                      </div>
 
-                  <button
-                    className="dispatch-button"
-                    onClick={() =>
-                      setActivePage('Fleet')
-                    }
-                  >
-                    OPEN FLEET CONTROL
-                    <span>→</span>
-                  </button>
+                      <div className="dispatch-node">
+
+                        <div className="node-icon vehicle">
+                          →
+                        </div>
+
+                        <div>
+
+                          <span>
+                            DESTINATION
+                          </span>
+
+                          <strong>
+                            {
+                              ships[0]
+                                .destination
+                            }
+                          </strong>
+
+                          <small>
+                            Heading{' '}
+                            {
+                              ships[0]
+                                .heading
+                            }
+                            °
+                          </small>
+
+                        </div>
+
+                      </div>
+                    </>
+                  ) : (
+                    <div className="dispatch-node">
+
+                      <div>
+
+                        <span>
+                          FLEET STATUS
+                        </span>
+
+                        <strong>
+                          Waiting for
+                          telemetry...
+                        </strong>
+
+                      </div>
+
+                    </div>
+                  )}
 
                 </div>
 
-              </section>
+                <button
+                  className="dispatch-button"
+                  onClick={() =>
+                    setActivePage(
+                      'Fleet'
+                    )
+                  }
+                >
+                  OPEN FLEET CONTROL
+                  <span>
+                    →
+                  </span>
+                </button>
 
-            </>
+              </div>
 
-          )}
+            </section>
 
-        </div>
+          </div>
+        )}
 
       </main>
-
     </div>
   )
 }
-
 
 export default App
