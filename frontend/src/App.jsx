@@ -1,17 +1,41 @@
-import { useEffect, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
+
 import './App.css'
+
 import { useFleetSocket } from './hooks/useFleetSocket'
+
 import FleetMap from './FleetMap'
 
+
 function App() {
-  const [activePage, setActivePage] = useState('Dashboard')
-  const [time, setTime] = useState(new Date())
+  const [activePage, setActivePage] =
+    useState('Dashboard')
+
+  const [time, setTime] =
+    useState(new Date())
+
+  // ==========================================================
+  // RESTRICTED ZONE BREACHES
+  // ==========================================================
+
+  const [zoneBreaches, setZoneBreaches] =
+    useState([])
 
   const {
     ships,
     connected,
     lastUpdate,
   } = useFleetSocket()
+
+
+  // ==========================================================
+  // CLOCK
+  // ==========================================================
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -21,33 +45,28 @@ function App() {
     return () => clearInterval(timer)
   }, [])
 
-  const formattedTime = time.toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
 
-  const activeShips = ships.length
+  // ==========================================================
+  // RESTRICTED ZONE CALLBACK
+  // ==========================================================
 
-  const normalShips = ships.filter(
-    (ship) => ship.status === 'normal'
-  ).length
+  const handleZoneBreachesChange =
+    useCallback((breaches) => {
+      setZoneBreaches(breaches)
+    }, [])
 
-  const isCrisisStatus = (status) =>
-    status === 'warning' ||
-    status === 'critical' ||
-    status === 'distress' ||
-    status === 'distressed' ||
-    status === 'insufficient_fuel' ||
-    status === 'stranded'
 
-  const alertShips = ships.filter(
-    (ship) => isCrisisStatus(ship.status)
-  ).length
+  // ==========================================================
+  // TIME
+  // ==========================================================
 
-  const crisisVessels = ships.filter(
-    (ship) => isCrisisStatus(ship.status)
-  )
+  const formattedTime =
+    time.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+
 
   const lastUpdateText = lastUpdate
     ? lastUpdate.toLocaleTimeString([], {
@@ -57,6 +76,74 @@ function App() {
       })
     : '--:--:--'
 
+
+  // ==========================================================
+  // FLEET STATS
+  // ==========================================================
+
+  const activeShips = ships.length
+
+  const normalShips = ships.filter(
+    (ship) => ship.status === 'normal'
+  ).length
+
+
+  // ==========================================================
+  // CRISIS STATUS
+  // ==========================================================
+
+  const isCrisisStatus = (status) =>
+    status === 'warning' ||
+    status === 'critical' ||
+    status === 'distress' ||
+    status === 'distressed' ||
+    status === 'insufficient_fuel' ||
+    status === 'stranded'
+
+
+  const statusCrisisShips = ships.filter(
+    (ship) => isCrisisStatus(ship.status)
+  )
+
+
+  // ==========================================================
+  // PREVENT DOUBLE COUNTING
+  // ==========================================================
+
+  const statusAlertIds = useMemo(
+    () =>
+      new Set(
+        statusCrisisShips.map(
+          (ship) => ship.id || ship.name
+        )
+      ),
+    [statusCrisisShips]
+  )
+
+
+  const uniqueZoneBreaches =
+    zoneBreaches.filter(
+      (breach) =>
+        !statusAlertIds.has(breach.shipId)
+    )
+
+
+  const totalCrisisCount =
+    statusAlertIds.size +
+    uniqueZoneBreaches.length
+
+
+  // ==========================================================
+  // CRISIS VESSELS
+  // ==========================================================
+
+  const crisisVessels = statusCrisisShips
+
+
+  // ==========================================================
+  // STATUS HELPERS
+  // ==========================================================
+
   const getStatusLabel = (status) => {
     if (!status) return 'UNKNOWN'
 
@@ -65,19 +152,24 @@ function App() {
       .toUpperCase()
   }
 
+
   const getStatusClass = (status) => {
-    if (status === 'critical') return 'critical'
+    if (status === 'critical') {
+      return 'critical'
+    }
 
     if (
       status === 'distress' ||
       status === 'distressed' ||
-      status === 'stranded'
+      status === 'stranded' ||
+      status === 'insufficient_fuel'
     ) {
       return 'distress'
     }
 
     return 'warning'
   }
+
 
   const getFuelText = (ship) => {
     if (typeof ship.fuel_tons === 'number') {
@@ -87,6 +179,7 @@ function App() {
     return 'N/A'
   }
 
+
   const getSpeedText = (ship) => {
     if (typeof ship.speed_knots === 'number') {
       return `${ship.speed_knots} kn`
@@ -94,6 +187,7 @@ function App() {
 
     return 'N/A'
   }
+
 
   const getPositionText = (ship) => {
     if (
@@ -107,26 +201,50 @@ function App() {
     return 'Position unavailable'
   }
 
+
+  // ==========================================================
+  // DASHBOARD ALERT LIST
+  // ==========================================================
+
+  const dashboardStatusAlerts =
+    ships.filter(
+      (ship) => isCrisisStatus(ship.status)
+    )
+
+
+  const dashboardZoneAlerts =
+    uniqueZoneBreaches
+
+
+  // ==========================================================
+  // RENDER
+  // ==========================================================
+
   return (
     <div className="app-shell">
 
-      {/* SIDEBAR */}
+      {/* ======================================================
+          SIDEBAR
+      ====================================================== */}
 
       <aside className="sidebar">
 
-       <div className="logo-area">
-  <div className="logo-mark">
-    <span>FS</span>
-  </div>
+        <div className="logo-area">
+          <div className="logo-mark">
+            <span>FS</span>
+          </div>
 
-  <div>
-    <h2>FLEETSENTINEL</h2>
-    <p>COMMAND CENTER</p>
-  </div>
-</div>
+          <div>
+            <h2>FLEETSENTINEL</h2>
+            <p>COMMAND CENTER</p>
+          </div>
+        </div>
+
+
         <div className="sidebar-label">
           COMMAND
         </div>
+
 
         <nav className="navigation">
 
@@ -141,9 +259,13 @@ function App() {
             <button
               key={name}
               className={`nav-button ${
-                activePage === name ? 'selected' : ''
+                activePage === name
+                  ? 'selected'
+                  : ''
               }`}
-              onClick={() => setActivePage(name)}
+              onClick={() =>
+                setActivePage(name)
+              }
             >
 
               <span className="nav-icon">
@@ -156,15 +278,15 @@ function App() {
 
               {name === 'Crisis Center' && (
                 <span className="nav-alert">
-                  {alertShips}
+                  {totalCrisisCount}
                 </span>
               )}
 
             </button>
-
           ))}
 
         </nav>
+
 
         <div className="sidebar-bottom">
 
@@ -177,7 +299,6 @@ function App() {
             />
 
             <div>
-
               <strong>
                 {connected
                   ? 'SYSTEM ONLINE'
@@ -189,10 +310,10 @@ function App() {
                   ? 'Fleet telemetry operational'
                   : 'Waiting for backend'}
               </span>
-
             </div>
 
           </div>
+
 
           <div className="operator">
 
@@ -201,7 +322,6 @@ function App() {
             </div>
 
             <div>
-
               <strong>
                 COMMAND OPERATOR
               </strong>
@@ -209,7 +329,6 @@ function App() {
               <span>
                 Administrator
               </span>
-
             </div>
 
             <span className="more">
@@ -223,11 +342,15 @@ function App() {
       </aside>
 
 
-      {/* MAIN */}
+      {/* ======================================================
+          MAIN
+      ====================================================== */}
 
       <main className="main-area">
 
-        {/* TOP BAR */}
+        {/* ====================================================
+            TOP BAR
+        ==================================================== */}
 
         <header className="topbar">
 
@@ -243,13 +366,16 @@ function App() {
 
           </div>
 
+
           <div className="topbar-right">
 
             <div className="live-status">
 
               <span
                 className={`connection-dot ${
-                  connected ? 'online' : 'offline'
+                  connected
+                    ? 'online'
+                    : 'offline'
                 }`}
               />
 
@@ -258,6 +384,7 @@ function App() {
                 : 'CONNECTING...'}
 
             </div>
+
 
             <div className="clock">
 
@@ -269,12 +396,13 @@ function App() {
 
             </div>
 
+
             <div className="notification">
 
               ♢
 
               <b>
-                {alertShips}
+                {totalCrisisCount}
               </b>
 
             </div>
@@ -284,13 +412,16 @@ function App() {
         </header>
 
 
-        {/* CONTENT */}
+        {/* ====================================================
+            CONTENT
+        ==================================================== */}
 
         <div className="dashboard-content">
 
-          {/* =====================================================
+
+          {/* ==================================================
               CRISIS CENTER
-              ===================================================== */}
+          ================================================== */}
 
           {activePage === 'Crisis Center' ? (
 
@@ -343,13 +474,16 @@ function App() {
 
                 </div>
 
+
                 <div
                   style={{
                     minWidth: '190px',
                     padding: '18px 20px',
                     borderRadius: '14px',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    background: 'rgba(255,255,255,0.03)',
+                    border:
+                      '1px solid rgba(255,255,255,0.08)',
+                    background:
+                      'rgba(255,255,255,0.03)',
                   }}
                 >
 
@@ -371,7 +505,7 @@ function App() {
                       lineHeight: 1,
                     }}
                   >
-                    {alertShips
+                    {totalCrisisCount
                       .toString()
                       .padStart(2, '0')}
                   </div>
@@ -402,8 +536,10 @@ function App() {
                   padding: '14px 18px',
                   marginBottom: '24px',
                   borderRadius: '12px',
-                  border: '1px solid rgba(255,255,255,0.07)',
-                  background: 'rgba(255,255,255,0.025)',
+                  border:
+                    '1px solid rgba(255,255,255,0.07)',
+                  background:
+                    'rgba(255,255,255,0.025)',
                 }}
               >
 
@@ -443,6 +579,7 @@ function App() {
 
                 </div>
 
+
                 <span
                   style={{
                     fontSize: '12px',
@@ -455,9 +592,11 @@ function App() {
               </div>
 
 
-              {/* NO CRISIS */}
+              {/* =================================================
+                  NO CRISIS
+              ================================================= */}
 
-              {crisisVessels.length === 0 ? (
+              {totalCrisisCount === 0 ? (
 
                 <div
                   style={{
@@ -468,7 +607,8 @@ function App() {
                     justifyContent: 'center',
                     textAlign: 'center',
                     borderRadius: '18px',
-                    border: '1px solid rgba(57,217,138,0.18)',
+                    border:
+                      '1px solid rgba(57,217,138,0.18)',
                     background:
                       'linear-gradient(145deg, rgba(57,217,138,0.06), rgba(255,255,255,0.02))',
                   }}
@@ -526,7 +666,9 @@ function App() {
 
               ) : (
 
-                /* ACTIVE CRISIS LIST */
+                /* =================================================
+                   ACTIVE CRISIS LIST
+                ================================================= */
 
                 <div
                   style={{
@@ -536,47 +678,508 @@ function App() {
                   }}
                 >
 
-                  {crisisVessels.map((ship, index) => {
+                  {/* =================================================
+                      NORMAL STATUS CRISIS VESSELS
+                  ================================================= */}
 
-                    const statusClass =
-                      getStatusClass(ship.status)
+                  {crisisVessels.map(
+                    (ship, index) => {
 
-                    const statusLabel =
-                      getStatusLabel(ship.status)
+                      const statusClass =
+                        getStatusClass(
+                          ship.status
+                        )
 
-                    return (
+                      const statusLabel =
+                        getStatusLabel(
+                          ship.status
+                        )
+
+                      const matchingBreach =
+                        zoneBreaches.find(
+                          (breach) =>
+                            breach.shipId ===
+                            (ship.id ||
+                              ship.name)
+                        )
+
+                      return (
+
+                        <div
+                          key={
+                            ship.id ||
+                            ship.name ||
+                            `crisis-${index}`
+                          }
+                          style={{
+                            position: 'relative',
+                            overflow: 'hidden',
+                            padding: '22px',
+                            borderRadius: '16px',
+                            border:
+                              statusClass ===
+                              'critical'
+                                ? '1px solid rgba(239,68,68,0.32)'
+                                : '1px solid rgba(245,158,11,0.25)',
+                            background:
+                              statusClass ===
+                              'critical'
+                                ? 'rgba(239,68,68,0.045)'
+                                : 'rgba(245,158,11,0.035)',
+                          }}
+                        >
+
+                          {/* TOP ROW */}
+
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '20px',
+                              marginBottom: '20px',
+                            }}
+                          >
+
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '14px',
+                              }}
+                            >
+
+                              <div
+                                style={{
+                                  width: '44px',
+                                  height: '44px',
+                                  flexShrink: 0,
+                                  borderRadius: '12px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '20px',
+                                  fontWeight: 700,
+                                  background:
+                                    statusClass ===
+                                    'critical'
+                                      ? 'rgba(239,68,68,0.13)'
+                                      : 'rgba(245,158,11,0.13)',
+                                  border:
+                                    statusClass ===
+                                    'critical'
+                                      ? '1px solid rgba(239,68,68,0.25)'
+                                      : '1px solid rgba(245,158,11,0.25)',
+                                }}
+                              >
+                                !
+                              </div>
+
+
+                              <div>
+
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '10px',
+                                    flexWrap: 'wrap',
+                                  }}
+                                >
+
+                                  <h3
+                                    style={{
+                                      margin: 0,
+                                      fontSize: '20px',
+                                    }}
+                                  >
+                                    {ship.name ||
+                                      'Unknown Vessel'}
+                                  </h3>
+
+                                  <span
+                                    style={{
+                                      display:
+                                        'inline-flex',
+                                      alignItems:
+                                        'center',
+                                      padding:
+                                        '5px 9px',
+                                      borderRadius:
+                                        '6px',
+                                      fontSize:
+                                        '10px',
+                                      fontWeight: 700,
+                                      letterSpacing:
+                                        '0.8px',
+                                      background:
+                                        statusClass ===
+                                        'critical'
+                                          ? 'rgba(239,68,68,0.13)'
+                                          : 'rgba(245,158,11,0.13)',
+                                    }}
+                                  >
+                                    {statusLabel}
+                                  </span>
+
+                                </div>
+
+
+                                <div
+                                  style={{
+                                    marginTop: '5px',
+                                    fontSize: '12px',
+                                    opacity: 0.5,
+                                  }}
+                                >
+                                  Vessel ID:{' '}
+                                  {ship.id ||
+                                    'N/A'}
+                                </div>
+
+                              </div>
+
+                            </div>
+
+
+                            <span
+                              style={{
+                                fontSize: '12px',
+                                opacity: 0.5,
+                                whiteSpace:
+                                  'nowrap',
+                              }}
+                            >
+                              LIVE
+                            </span>
+
+                          </div>
+
+
+                          {/* DETAILS */}
+
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns:
+                                'repeat(4, minmax(0, 1fr))',
+                              gap: '12px',
+                            }}
+                          >
+
+                            <div
+                              style={{
+                                padding: '14px',
+                                borderRadius: '10px',
+                                background:
+                                  'rgba(255,255,255,0.025)',
+                                border:
+                                  '1px solid rgba(255,255,255,0.05)',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontSize: '10px',
+                                  letterSpacing:
+                                    '1px',
+                                  opacity: 0.45,
+                                  marginBottom:
+                                    '6px',
+                                }}
+                              >
+                                FUEL
+                              </div>
+
+                              <strong
+                                style={{
+                                  fontSize: '15px',
+                                }}
+                              >
+                                {getFuelText(
+                                  ship
+                                )}
+                              </strong>
+                            </div>
+
+
+                            <div
+                              style={{
+                                padding: '14px',
+                                borderRadius: '10px',
+                                background:
+                                  'rgba(255,255,255,0.025)',
+                                border:
+                                  '1px solid rgba(255,255,255,0.05)',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontSize: '10px',
+                                  letterSpacing:
+                                    '1px',
+                                  opacity: 0.45,
+                                  marginBottom:
+                                    '6px',
+                                }}
+                              >
+                                DESTINATION
+                              </div>
+
+                              <strong
+                                style={{
+                                  fontSize: '15px',
+                                }}
+                              >
+                                {ship.destination ||
+                                  'N/A'}
+                              </strong>
+                            </div>
+
+
+                            <div
+                              style={{
+                                padding: '14px',
+                                borderRadius: '10px',
+                                background:
+                                  'rgba(255,255,255,0.025)',
+                                border:
+                                  '1px solid rgba(255,255,255,0.05)',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontSize: '10px',
+                                  letterSpacing:
+                                    '1px',
+                                  opacity: 0.45,
+                                  marginBottom:
+                                    '6px',
+                                }}
+                              >
+                                SPEED
+                              </div>
+
+                              <strong
+                                style={{
+                                  fontSize: '15px',
+                                }}
+                              >
+                                {getSpeedText(
+                                  ship
+                                )}
+                              </strong>
+                            </div>
+
+
+                            <div
+                              style={{
+                                padding: '14px',
+                                borderRadius: '10px',
+                                background:
+                                  'rgba(255,255,255,0.025)',
+                                border:
+                                  '1px solid rgba(255,255,255,0.05)',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontSize: '10px',
+                                  letterSpacing:
+                                    '1px',
+                                  opacity: 0.45,
+                                  marginBottom:
+                                    '6px',
+                                }}
+                              >
+                                POSITION
+                              </div>
+
+                              <strong
+                                style={{
+                                  fontSize: '13px',
+                                }}
+                              >
+                                {getPositionText(
+                                  ship
+                                )}
+                              </strong>
+                            </div>
+
+                          </div>
+
+
+                          {/* ZONE BREACH DETAILS */}
+
+                          {matchingBreach && (
+                            <div
+                              style={{
+                                marginTop: '14px',
+                                padding: '12px 14px',
+                                borderRadius: '10px',
+                                background:
+                                  'rgba(239,68,68,0.08)',
+                                border:
+                                  '1px solid rgba(239,68,68,0.2)',
+                              }}
+                            >
+
+                              <div
+                                style={{
+                                  fontSize: '10px',
+                                  letterSpacing:
+                                    '1px',
+                                  color: '#fca5a5',
+                                  marginBottom:
+                                    '5px',
+                                  fontWeight: 700,
+                                }}
+                              >
+                                ⚠ RESTRICTED ZONE BREACH
+                              </div>
+
+                              <div
+                                style={{
+                                  fontSize: '12px',
+                                  color: '#fecaca',
+                                }}
+                              >
+                                Zone:{' '}
+                                <strong>
+                                  {
+                                    matchingBreach.zoneName
+                                  }
+                                </strong>
+                              </div>
+
+                            </div>
+                          )}
+
+
+                          {/* SECONDARY DETAILS */}
+
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent:
+                                'space-between',
+                              gap: '20px',
+                              marginTop: '14px',
+                              paddingTop: '14px',
+                              borderTop:
+                                '1px solid rgba(255,255,255,0.06)',
+                            }}
+                          >
+
+                            <div
+                              style={{
+                                display: 'flex',
+                                gap: '24px',
+                                flexWrap: 'wrap',
+                                fontSize: '12px',
+                                opacity: 0.6,
+                              }}
+                            >
+
+                              <span>
+                                Cargo:{' '}
+                                <strong
+                                  style={{
+                                    opacity: 1,
+                                  }}
+                                >
+                                  {ship.cargo ||
+                                    'N/A'}
+                                </strong>
+                              </span>
+
+                              <span>
+                                Heading:{' '}
+                                <strong
+                                  style={{
+                                    opacity: 1,
+                                  }}
+                                >
+                                  {typeof ship.heading ===
+                                  'number'
+                                    ? `${ship.heading}°`
+                                    : 'N/A'}
+                                </strong>
+                              </span>
+
+                            </div>
+
+
+                            <button
+                              onClick={() =>
+                                setActivePage(
+                                  'Fleet'
+                                )
+                              }
+                              style={{
+                                border:
+                                  '1px solid rgba(255,255,255,0.1)',
+                                background:
+                                  'rgba(255,255,255,0.04)',
+                                borderRadius:
+                                  '8px',
+                                padding:
+                                  '9px 14px',
+                                cursor:
+                                  'pointer',
+                                color:
+                                  'inherit',
+                                fontSize:
+                                  '11px',
+                                fontWeight:
+                                  600,
+                                letterSpacing:
+                                  '0.5px',
+                              }}
+                            >
+                              VIEW FLEET →
+                            </button>
+
+                          </div>
+
+                        </div>
+                      )
+                    }
+                  )}
+
+
+                  {/* =================================================
+                      RESTRICTED ZONE BREACHES
+                  ================================================= */}
+
+                  {uniqueZoneBreaches.map(
+                    (breach) => (
 
                       <div
-                        key={
-                          ship.id ||
-                          ship.name ||
-                          `crisis-${index}`
-                        }
+                        key={`zone-${breach.shipId}`}
                         style={{
                           position: 'relative',
                           overflow: 'hidden',
                           padding: '22px',
                           borderRadius: '16px',
                           border:
-                            statusClass === 'critical'
-                              ? '1px solid rgba(239,68,68,0.32)'
-                              : '1px solid rgba(245,158,11,0.25)',
+                            '1px solid rgba(239,68,68,0.35)',
                           background:
-                            statusClass === 'critical'
-                              ? 'rgba(239,68,68,0.045)'
-                              : 'rgba(245,158,11,0.035)',
+                            'rgba(239,68,68,0.055)',
                         }}
                       >
 
-                        {/* TOP ROW */}
+                        {/* TOP */}
 
                         <div
                           style={{
                             display: 'flex',
                             alignItems: 'center',
-                            justifyContent: 'space-between',
+                            justifyContent:
+                              'space-between',
                             gap: '20px',
-                            marginBottom: '20px',
+                            marginBottom:
+                              '18px',
                           }}
                         >
 
@@ -593,100 +1196,130 @@ function App() {
                                 width: '44px',
                                 height: '44px',
                                 flexShrink: 0,
-                                borderRadius: '12px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '20px',
+                                borderRadius:
+                                  '12px',
+                                display:
+                                  'flex',
+                                alignItems:
+                                  'center',
+                                justifyContent:
+                                  'center',
+                                fontSize:
+                                  '20px',
                                 fontWeight: 700,
+                                color:
+                                  '#fecaca',
                                 background:
-                                  statusClass === 'critical'
-                                    ? 'rgba(239,68,68,0.13)'
-                                    : 'rgba(245,158,11,0.13)',
+                                  'rgba(239,68,68,0.15)',
                                 border:
-                                  statusClass === 'critical'
-                                    ? '1px solid rgba(239,68,68,0.25)'
-                                    : '1px solid rgba(245,158,11,0.25)',
+                                  '1px solid rgba(239,68,68,0.3)',
                               }}
                             >
                               !
                             </div>
 
+
                             <div>
 
                               <div
                                 style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
+                                  display:
+                                    'flex',
+                                  alignItems:
+                                    'center',
                                   gap: '10px',
-                                  flexWrap: 'wrap',
+                                  flexWrap:
+                                    'wrap',
                                 }}
                               >
 
                                 <h3
                                   style={{
                                     margin: 0,
-                                    fontSize: '20px',
+                                    fontSize:
+                                      '20px',
                                   }}
                                 >
-                                  {ship.name ||
-                                    'Unknown Vessel'}
+                                  {breach.shipName}
                                 </h3>
 
                                 <span
                                   style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    padding: '5px 9px',
-                                    borderRadius: '6px',
-                                    fontSize: '10px',
-                                    fontWeight: 700,
-                                    letterSpacing: '0.8px',
+                                    display:
+                                      'inline-flex',
+                                    alignItems:
+                                      'center',
+                                    padding:
+                                      '5px 9px',
+                                    borderRadius:
+                                      '6px',
+                                    fontSize:
+                                      '10px',
+                                    fontWeight:
+                                      700,
+                                    letterSpacing:
+                                      '0.8px',
+                                    color:
+                                      '#fecaca',
                                     background:
-                                      statusClass === 'critical'
-                                        ? 'rgba(239,68,68,0.13)'
-                                        : 'rgba(245,158,11,0.13)',
+                                      'rgba(239,68,68,0.15)',
                                   }}
                                 >
-                                  {statusLabel}
+                                  ZONE BREACH
                                 </span>
 
                               </div>
 
+
                               <div
                                 style={{
-                                  marginTop: '5px',
-                                  fontSize: '12px',
-                                  opacity: 0.5,
+                                  marginTop:
+                                    '5px',
+                                  fontSize:
+                                    '12px',
+                                  opacity:
+                                    0.55,
                                 }}
                               >
-                                Vessel ID: {ship.id || 'N/A'}
+                                Vessel ID:{' '}
+                                {breach.shipId ||
+                                  'N/A'}
                               </div>
 
                             </div>
 
                           </div>
 
+
                           <span
                             style={{
-                              fontSize: '12px',
-                              opacity: 0.5,
-                              whiteSpace: 'nowrap',
+                              padding:
+                                '5px 9px',
+                              borderRadius:
+                                '6px',
+                              fontSize:
+                                '10px',
+                              fontWeight:
+                                700,
+                              color:
+                                '#fecaca',
+                              background:
+                                'rgba(239,68,68,0.13)',
                             }}
                           >
-                            LIVE
+                            ACTIVE
                           </span>
 
                         </div>
 
 
-                        {/* DETAILS */}
+                        {/* BREACH INFORMATION */}
 
                         <div
                           style={{
                             display: 'grid',
                             gridTemplateColumns:
-                              'repeat(4, minmax(0, 1fr))',
+                              'repeat(3, minmax(0, 1fr))',
                             gap: '12px',
                           }}
                         >
@@ -694,199 +1327,174 @@ function App() {
                           <div
                             style={{
                               padding: '14px',
-                              borderRadius: '10px',
+                              borderRadius:
+                                '10px',
                               background:
                                 'rgba(255,255,255,0.025)',
                               border:
                                 '1px solid rgba(255,255,255,0.05)',
                             }}
                           >
+
                             <div
                               style={{
-                                fontSize: '10px',
-                                letterSpacing: '1px',
-                                opacity: 0.45,
-                                marginBottom: '6px',
+                                fontSize:
+                                  '10px',
+                                letterSpacing:
+                                  '1px',
+                                opacity:
+                                  0.45,
+                                marginBottom:
+                                  '6px',
                               }}
                             >
-                              FUEL
+                              RESTRICTED ZONE
                             </div>
 
-                            <strong style={{ fontSize: '15px' }}>
-                              {getFuelText(ship)}
+                            <strong
+                              style={{
+                                fontSize:
+                                  '14px',
+                              }}
+                            >
+                              {breach.zoneName}
                             </strong>
+
                           </div>
 
 
                           <div
                             style={{
                               padding: '14px',
-                              borderRadius: '10px',
+                              borderRadius:
+                                '10px',
                               background:
                                 'rgba(255,255,255,0.025)',
                               border:
                                 '1px solid rgba(255,255,255,0.05)',
                             }}
                           >
+
                             <div
                               style={{
-                                fontSize: '10px',
-                                letterSpacing: '1px',
-                                opacity: 0.45,
-                                marginBottom: '6px',
-                              }}
-                            >
-                              DESTINATION
-                            </div>
-
-                            <strong style={{ fontSize: '15px' }}>
-                              {ship.destination || 'N/A'}
-                            </strong>
-                          </div>
-
-
-                          <div
-                            style={{
-                              padding: '14px',
-                              borderRadius: '10px',
-                              background:
-                                'rgba(255,255,255,0.025)',
-                              border:
-                                '1px solid rgba(255,255,255,0.05)',
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontSize: '10px',
-                                letterSpacing: '1px',
-                                opacity: 0.45,
-                                marginBottom: '6px',
-                              }}
-                            >
-                              SPEED
-                            </div>
-
-                            <strong style={{ fontSize: '15px' }}>
-                              {getSpeedText(ship)}
-                            </strong>
-                          </div>
-
-
-                          <div
-                            style={{
-                              padding: '14px',
-                              borderRadius: '10px',
-                              background:
-                                'rgba(255,255,255,0.025)',
-                              border:
-                                '1px solid rgba(255,255,255,0.05)',
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontSize: '10px',
-                                letterSpacing: '1px',
-                                opacity: 0.45,
-                                marginBottom: '6px',
+                                fontSize:
+                                  '10px',
+                                letterSpacing:
+                                  '1px',
+                                opacity:
+                                  0.45,
+                                marginBottom:
+                                  '6px',
                               }}
                             >
                               POSITION
                             </div>
 
-                            <strong style={{ fontSize: '13px' }}>
-                              {getPositionText(ship)}
+                            <strong
+                              style={{
+                                fontSize:
+                                  '13px',
+                              }}
+                            >
+                              {Number(
+                                breach.position.lat
+                              ).toFixed(5)}
+                              ,{' '}
+                              {Number(
+                                breach.position.lng
+                              ).toFixed(5)}
                             </strong>
+
                           </div>
 
-                        </div>
-
-
-                        {/* SECONDARY DETAILS */}
-
-                        <div
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: '20px',
-                            marginTop: '14px',
-                            paddingTop: '14px',
-                            borderTop:
-                              '1px solid rgba(255,255,255,0.06)',
-                          }}
-                        >
 
                           <div
                             style={{
-                              display: 'flex',
-                              gap: '24px',
-                              flexWrap: 'wrap',
-                              fontSize: '12px',
-                              opacity: 0.6,
+                              padding: '14px',
+                              borderRadius:
+                                '10px',
+                              background:
+                                'rgba(255,255,255,0.025)',
+                              border:
+                                '1px solid rgba(255,255,255,0.05)',
                             }}
                           >
 
-                            <span>
-                              Cargo:{' '}
-                              <strong style={{ opacity: 1 }}>
-                                {ship.cargo || 'N/A'}
-                              </strong>
-                            </span>
+                            <div
+                              style={{
+                                fontSize:
+                                  '10px',
+                                letterSpacing:
+                                  '1px',
+                                opacity:
+                                  0.45,
+                                marginBottom:
+                                  '6px',
+                              }}
+                            >
+                              INCIDENT STATUS
+                            </div>
 
-                            <span>
-                              Heading:{' '}
-                              <strong style={{ opacity: 1 }}>
-                                {typeof ship.heading === 'number'
-                                  ? `${ship.heading}°`
-                                  : 'N/A'}
-                              </strong>
-                            </span>
+                            <strong
+                              style={{
+                                fontSize:
+                                  '14px',
+                                color:
+                                  '#fca5a5',
+                              }}
+                            >
+                              ACTIVE
+                            </strong>
 
                           </div>
 
-                          <button
-                            onClick={() =>
-                              setActivePage('Fleet')
-                            }
-                            style={{
-                              border:
-                                '1px solid rgba(255,255,255,0.1)',
-                              background:
-                                'rgba(255,255,255,0.04)',
-                              borderRadius: '8px',
-                              padding: '9px 14px',
-                              cursor: 'pointer',
-                              color: 'inherit',
-                              fontSize: '11px',
-                              fontWeight: 600,
-                              letterSpacing: '0.5px',
-                            }}
-                          >
-                            VIEW FLEET →
-                          </button>
+                        </div>
 
+
+                        {/* WARNING */}
+
+                        <div
+                          style={{
+                            marginTop:
+                              '14px',
+                            padding:
+                              '12px 14px',
+                            borderRadius:
+                              '10px',
+                            background:
+                              'rgba(239,68,68,0.08)',
+                            border:
+                              '1px solid rgba(239,68,68,0.18)',
+                            fontSize:
+                              '12px',
+                            color:
+                              '#fecaca',
+                          }}
+                        >
+                          ⚠ Vessel has entered a restricted
+                          operational zone.
                         </div>
 
                       </div>
-
                     )
-                  })}
+                  )}
 
                 </div>
-
               )}
 
             </section>
 
           ) : (
 
-            /* =====================================================
+            /* ==================================================
                DASHBOARD
-               ===================================================== */
+            ================================================== */
 
             <>
 
-              {/* HERO */}
+              {/* =================================================
+                  HERO
+              ================================================= */}
 
               <section className="hero">
 
@@ -911,16 +1519,15 @@ function App() {
 
                 </div>
 
+
                 <div className="hero-status">
 
                   <div className="radar">
-
                     <div className="radar-ring ring-one"></div>
                     <div className="radar-ring ring-two"></div>
                     <div className="radar-ring ring-three"></div>
                     <div className="radar-center"></div>
                     <div className="radar-line"></div>
-
                   </div>
 
                   <div>
@@ -946,7 +1553,9 @@ function App() {
               </section>
 
 
-              {/* STATS */}
+              {/* =================================================
+                  STATS
+              ================================================= */}
 
               <section className="stats">
 
@@ -954,7 +1563,9 @@ function App() {
 
                   <div className="stat-top">
                     <span>ACTIVE VESSELS</span>
-                    <div className="stat-icon blue">▦</div>
+                    <div className="stat-icon blue">
+                      ▦
+                    </div>
                   </div>
 
                   <strong>
@@ -975,7 +1586,10 @@ function App() {
 
                   <div className="stat-top">
                     <span>TRACKED SHIPS</span>
-                    <div className="stat-icon purple">▣</div>
+
+                    <div className="stat-icon purple">
+                      ▣
+                    </div>
                   </div>
 
                   <strong>
@@ -994,11 +1608,14 @@ function App() {
 
                   <div className="stat-top">
                     <span>ACTIVE ALERTS</span>
-                    <div className="stat-icon red">⚠</div>
+
+                    <div className="stat-icon red">
+                      ⚠
+                    </div>
                   </div>
 
                   <strong>
-                    {alertShips
+                    {totalCrisisCount
                       .toString()
                       .padStart(2, '0')}
                   </strong>
@@ -1014,7 +1631,10 @@ function App() {
 
                   <div className="stat-top">
                     <span>NORMAL VESSELS</span>
-                    <div className="stat-icon green">✓</div>
+
+                    <div className="stat-icon green">
+                      ✓
+                    </div>
                   </div>
 
                   <strong>
@@ -1042,11 +1662,15 @@ function App() {
               </section>
 
 
-              {/* MAIN GRID */}
+              {/* =================================================
+                  MAIN GRID
+              ================================================= */}
 
               <section className="main-grid">
 
-                {/* REAL LIVE MAP */}
+                {/* =================================================
+                    LIVE MAP
+                ================================================= */}
 
                 <div className="panel map-panel">
 
@@ -1070,6 +1694,7 @@ function App() {
 
                   </div>
 
+
                   <div
                     className="map"
                     style={{
@@ -1078,7 +1703,13 @@ function App() {
                     }}
                   >
 
-                    <FleetMap ships={ships} />
+                    <FleetMap
+                      ships={ships}
+                      onZoneBreachesChange={
+                        handleZoneBreachesChange
+                      }
+                    />
+
 
                     <div className="map-legend">
 
@@ -1104,7 +1735,9 @@ function App() {
                 </div>
 
 
-                {/* CRISIS */}
+                {/* =================================================
+                    CRISIS PANEL
+                ================================================= */}
 
                 <div className="panel crisis-panel">
 
@@ -1123,7 +1756,7 @@ function App() {
                     </div>
 
                     <span className="crisis-count">
-                      {alertShips
+                      {totalCrisisCount
                         .toString()
                         .padStart(2, '0')} ACTIVE
                     </span>
@@ -1133,11 +1766,9 @@ function App() {
 
                   <div className="crisis-list">
 
-                    {ships
-                      .filter(
-                        (ship) =>
-                          ship.status !== 'normal'
-                      )
+                    {/* STATUS ALERTS */}
+
+                    {dashboardStatusAlerts
                       .slice(0, 3)
                       .map((ship, index) => (
 
@@ -1196,11 +1827,83 @@ function App() {
                           </button>
 
                         </div>
-
                       ))}
 
 
-                    {alertShips === 0 && (
+                    {/* ZONE BREACH ALERTS */}
+
+                    {dashboardZoneAlerts
+                      .slice(
+                        0,
+                        Math.max(
+                          0,
+                          3 -
+                            dashboardStatusAlerts
+                              .slice(0, 3)
+                              .length
+                        )
+                      )
+                      .map((breach) => (
+
+                        <div
+                          className="crisis-item critical"
+                          key={`zone-${breach.shipId}`}
+                        >
+
+                          <div className="crisis-indicator">
+                            !
+                          </div>
+
+                          <div className="crisis-info">
+
+                            <div className="crisis-title-row">
+
+                              <strong>
+                                {breach.shipName}
+                              </strong>
+
+                              <span>
+                                ZONE BREACH
+                              </span>
+
+                            </div>
+
+                            <p>
+                              ⚠ Restricted Zone:{' '}
+                              {breach.zoneName}
+                            </p>
+
+                            <small>
+                              Position:{' '}
+                              {Number(
+                                breach.position.lat
+                              ).toFixed(4)}
+                              ,{' '}
+                              {Number(
+                                breach.position.lng
+                              ).toFixed(4)}
+                            </small>
+
+                          </div>
+
+                          <button
+                            className="arrow-button"
+                            onClick={() =>
+                              setActivePage(
+                                'Crisis Center'
+                              )
+                            }
+                          >
+                            →
+                          </button>
+
+                        </div>
+                      ))}
+
+
+                    {/* NO ALERT */}
+
+                    {totalCrisisCount === 0 && (
 
                       <div className="crisis-item normal">
 
@@ -1242,7 +1945,9 @@ function App() {
                   <button
                     className="view-all"
                     onClick={() =>
-                      setActivePage('Crisis Center')
+                      setActivePage(
+                        'Crisis Center'
+                      )
                     }
                   >
                     VIEW ALL ALERTS
@@ -1254,11 +1959,15 @@ function App() {
               </section>
 
 
-              {/* BOTTOM GRID */}
+              {/* =================================================
+                  BOTTOM GRID
+              ================================================= */}
 
               <section className="bottom-grid">
 
-                {/* FLEET STATUS */}
+                {/* =================================================
+                    FLEET STATUS
+                ================================================= */}
 
                 <div className="panel fleet-panel">
 
@@ -1334,8 +2043,8 @@ function App() {
                             {getStatusLabel(
                               ship.status
                             )}
-
                           </span>
+
 
                           <div className="battery">
 
@@ -1344,7 +2053,8 @@ function App() {
                               <span
                                 style={{
                                   width: `${Math.min(
-                                    ((ship.fuel_tons || 0) /
+                                    ((ship.fuel_tons ||
+                                      0) /
                                       100) *
                                       100,
                                     100
@@ -1392,7 +2102,9 @@ function App() {
                 </div>
 
 
-                {/* RESPONSE */}
+                {/* =================================================
+                    RESPONSE
+                ================================================= */}
 
                 <div className="panel response-panel">
 
@@ -1471,7 +2183,8 @@ function App() {
                             </strong>
 
                             <small>
-                              Heading {ships[0].heading}°
+                              Heading{' '}
+                              {ships[0].heading}°
                             </small>
 
                           </div>
@@ -1528,5 +2241,6 @@ function App() {
     </div>
   )
 }
+
 
 export default App

@@ -3,243 +3,40 @@ import {
   TileLayer,
   Marker,
   Popup,
+  Polygon,
   useMap,
 } from 'react-leaflet'
 
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { useEffect, useRef } from 'react'
+import 'leaflet-draw/dist/leaflet.draw.css'
+import 'leaflet-draw'
+
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 
 
-// ======================================================
-// SHIP COLORS
-// ======================================================
+// ============================================================
+// SHIP COLOR
+// ============================================================
 
-function getShipColor(ship, index) {
-  const colors = [
-    '#38bdf8',
-    '#22c55e',
-    '#f59e0b',
-    '#a78bfa',
-    '#f43f5e',
-    '#14b8a6',
-    '#fb7185',
-    '#60a5fa',
-    '#facc15',
-    '#c084fc',
-    '#34d399',
-    '#fb923c',
-    '#818cf8',
-    '#2dd4bf',
-    '#e879f9',
-  ]
+const getShipColor = (ship, breached) => {
+  if (breached) return '#ef4444'
 
-  if (typeof ship.color === 'string') {
-    return ship.color
-  }
-
-  return colors[index % colors.length]
-}
-
-
-// ======================================================
-// SHIP ICON
-// ======================================================
-
-function createShipIcon(ship, index) {
-  const color = getShipColor(ship, index)
-
-  const heading =
-    typeof ship.heading === 'number'
-      ? ship.heading
-      : 0
-
-  const shortName =
-    ship.name && ship.name.length > 14
-      ? `${ship.name.slice(0, 14)}…`
-      : ship.name || `SHIP-${index + 1}`
-
-  return new L.DivIcon({
-    className: 'fleet-ship-marker',
-
-    html: `
-      <div
-        style="
-          position: relative;
-          width: 90px;
-          height: 62px;
-          transform: translate(-29px, -31px);
-          pointer-events: auto;
-        "
-      >
-
-        <!-- Direction -->
-
-        <div
-          style="
-            position: absolute;
-            left: 34px;
-            top: 0;
-            width: 0;
-            height: 0;
-            border-left: 6px solid transparent;
-            border-right: 6px solid transparent;
-            border-bottom: 15px solid ${color};
-            transform: rotate(${heading}deg);
-            transform-origin: 6px 30px;
-            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
-          "
-        ></div>
-
-
-        <!-- Ship -->
-
-        <div
-          style="
-            position: absolute;
-            left: 25px;
-            top: 18px;
-            width: 34px;
-            height: 34px;
-            border-radius: 50%;
-            background: rgba(10, 20, 35, 0.82);
-            border: 2px solid ${color};
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow:
-              0 0 0 3px rgba(255,255,255,0.05),
-              0 3px 8px rgba(0,0,0,0.5);
-          "
-        >
-          <span
-            style="
-              font-size: 21px;
-              line-height: 1;
-              display: block;
-              transform: rotate(${heading}deg);
-              filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));
-            "
-          >
-            🚢
-          </span>
-        </div>
-
-
-        <!-- Ship Name -->
-
-        <div
-          style="
-            position: absolute;
-            left: 0;
-            top: 54px;
-            width: 90px;
-            text-align: center;
-            font-family: Arial, sans-serif;
-            font-size: 9px;
-            font-weight: 700;
-            color: white;
-            text-shadow:
-              0 1px 2px #000,
-              0 0 3px #000;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          "
-        >
-          ${shortName}
-        </div>
-
-      </div>
-    `,
-
-    iconSize: [90, 62],
-    iconAnchor: [45, 31],
-    popupAnchor: [0, -25],
-  })
-}
-
-
-// ======================================================
-// INITIAL MAP VIEW
-// ======================================================
-
-function MapInitialView({ ships }) {
-  const map = useMap()
-
-  const hasInitialised = useRef(false)
-
-  useEffect(() => {
-    if (hasInitialised.current) {
-      return
-    }
-
-    const validShips = ships.filter(
-      (ship) =>
-        ship.position &&
-        typeof ship.position.lat === 'number' &&
-        typeof ship.position.lng === 'number'
-    )
-
-    if (validShips.length === 0) {
-      return
-    }
-
-    const bounds = L.latLngBounds(
-      validShips.map((ship) => [
-        ship.position.lat,
-        ship.position.lng,
-      ])
-    )
-
-    map.fitBounds(bounds, {
-      padding: [50, 50],
-      maxZoom: 10,
-      animate: false,
-    })
-
-    hasInitialised.current = true
-  }, [ships, map])
-
-  return null
-}
-
-
-// ======================================================
-// STATUS
-// ======================================================
-
-function getStatusLabel(status) {
-  if (!status) {
-    return 'UNKNOWN'
-  }
-
-  return status
-    .replace(/_/g, ' ')
-    .toUpperCase()
-}
-
-
-function getFuelText(ship) {
-  if (typeof ship.fuel_tons === 'number') {
-    return `${ship.fuel_tons.toLocaleString()} t`
-  }
-
-  return 'N/A'
-}
-
-
-function getStatusColor(status) {
-  if (status === 'critical') {
+  if (
+    ship.status === 'critical' ||
+    ship.status === 'distress' ||
+    ship.status === 'distressed' ||
+    ship.status === 'insufficient_fuel'
+  ) {
     return '#ef4444'
   }
 
-  if (
-    status === 'warning' ||
-    status === 'distress' ||
-    status === 'distressed' ||
-    status === 'stranded'
-  ) {
+  if (ship.status === 'warning') {
     return '#f59e0b'
   }
 
@@ -247,397 +44,803 @@ function getStatusColor(status) {
 }
 
 
-// ======================================================
-// ANIMATED SHIP
-// ======================================================
+// ============================================================
+// SHIP ICON
+// ============================================================
 
-function AnimatedShipMarker({ ship, index }) {
-  const markerRef = useRef(null)
+const createShipIcon = (ship, breached) => {
+  const color = getShipColor(ship, breached)
+  const heading = Number(ship.heading || 0)
 
-  const animationRef = useRef(null)
+  return L.divIcon({
+    className: 'fleet-ship-icon-wrapper',
 
-  const previousPositionRef = useRef(null)
+    html: `
+      <div style="
+        position:relative;
+        width:46px;
+        height:46px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+      ">
+
+        <div style="
+          position:absolute;
+          top:-8px;
+          left:50%;
+          width:3px;
+          height:18px;
+          background:${color};
+          transform-origin:bottom center;
+          transform:translateX(-50%) rotate(${heading}deg);
+          border-radius:3px;
+          box-shadow:0 0 6px ${color};
+        "></div>
+
+        <div style="
+          width:30px;
+          height:30px;
+          border-radius:50%;
+          background:${color};
+          border:3px solid white;
+          box-shadow:0 0 10px ${color};
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          font-size:15px;
+          z-index:2;
+        ">🚢</div>
+
+        ${
+          breached
+            ? `
+              <div style="
+                position:absolute;
+                right:-8px;
+                top:-8px;
+                width:17px;
+                height:17px;
+                background:#dc2626;
+                color:white;
+                border-radius:50%;
+                font-size:11px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                border:2px solid white;
+                z-index:5;
+              ">!</div>
+            `
+            : ''
+        }
+
+        <div style="
+          position:absolute;
+          top:35px;
+          left:50%;
+          transform:translateX(-50%);
+          white-space:nowrap;
+          background:rgba(0,0,0,.75);
+          color:white;
+          padding:2px 6px;
+          border-radius:4px;
+          font-size:9px;
+          font-weight:600;
+        ">
+          ${ship.name || 'Unknown'}
+        </div>
+
+      </div>
+    `,
+
+    iconSize: [46, 46],
+    iconAnchor: [23, 23],
+    popupAnchor: [0, -20],
+  })
+}
 
 
-  // ----------------------------------------------------
-  // Validate position
-  // ----------------------------------------------------
+// ============================================================
+// INITIAL MAP VIEW
+// ============================================================
 
-  const hasValidPosition =
-    ship.position &&
-    typeof ship.position.lat === 'number' &&
-    typeof ship.position.lng === 'number'
-
-
-  const latitude = hasValidPosition
-    ? ship.position.lat
-    : null
-
-  const longitude = hasValidPosition
-    ? ship.position.lng
-    : null
-
-
-  // ----------------------------------------------------
-  // Create icon
-  // ----------------------------------------------------
-
-  const icon = createShipIcon(
-    ship,
-    index
-  )
-
-
-  // ----------------------------------------------------
-  // Animate movement
-  // ----------------------------------------------------
+function MapInitialView({ ships }) {
+  const map = useMap()
+  const fittedRef = useRef(false)
 
   useEffect(() => {
+    if (fittedRef.current || !ships.length) return
+
+    const validShips = ships.filter(
+      (ship) =>
+        ship.position &&
+        Number.isFinite(Number(ship.position.lat)) &&
+        Number.isFinite(Number(ship.position.lng))
+    )
+
+    if (!validShips.length) return
+
+    const bounds = L.latLngBounds(
+      validShips.map((ship) => [
+        Number(ship.position.lat),
+        Number(ship.position.lng),
+      ])
+    )
+
+    map.fitBounds(bounds, {
+      padding: [35, 35],
+      maxZoom: 8,
+      animate: false,
+    })
+
+    fittedRef.current = true
+  }, [map, ships])
+
+  return null
+}
+
+
+// ============================================================
+// POINT INSIDE POLYGON
+// ============================================================
+
+function isPointInsidePolygon(lat, lng, polygon) {
+  if (!polygon || polygon.length < 3) return false
+
+  let inside = false
+
+  for (
+    let i = 0, j = polygon.length - 1;
+    i < polygon.length;
+    j = i++
+  ) {
+    const xi = polygon[i][1]
+    const yi = polygon[i][0]
+    const xj = polygon[j][1]
+    const yj = polygon[j][0]
+
+    const intersect =
+      yi > lat !== yj > lat &&
+      lng <
+        ((xj - xi) * (lat - yi)) /
+          (yj - yi) +
+          xi
+
+    if (intersect) inside = !inside
+  }
+
+  return inside
+}
+
+
+// ============================================================
+// STATUS
+// ============================================================
+
+function getStatusLabel(status) {
+  if (!status) return 'UNKNOWN'
+
+  return String(status)
+    .replaceAll('_', ' ')
+    .toUpperCase()
+}
+
+
+// ============================================================
+// SMOOTH SHIP MOVEMENT
+// ============================================================
+
+function AnimatedShipMarker({ ship, breached }) {
+  const markerRef = useRef(null)
+  const animationRef = useRef(null)
+  const previousPositionRef = useRef(null)
+
+  const position = ship.position
+
+  useEffect(() => {
+    if (!markerRef.current || !position) return
+
+    const targetLat = Number(position.lat)
+    const targetLng = Number(position.lng)
+
     if (
-      latitude === null ||
-      longitude === null ||
-      !markerRef.current
+      !Number.isFinite(targetLat) ||
+      !Number.isFinite(targetLng)
     ) {
       return
     }
 
     const marker = markerRef.current
 
-
-    // First position
-
     if (!previousPositionRef.current) {
-      previousPositionRef.current = {
-        lat: latitude,
-        lng: longitude,
-      }
+      marker.setLatLng([targetLat, targetLng])
 
-      marker.setLatLng([
-        latitude,
-        longitude,
-      ])
+      previousPositionRef.current = {
+        lat: targetLat,
+        lng: targetLng,
+      }
 
       return
     }
 
-
-    const startPosition = {
-      ...previousPositionRef.current,
-    }
-
-    const endPosition = {
-      lat: latitude,
-      lng: longitude,
-    }
-
-
-    // Save new position for next update
-
-    previousPositionRef.current = {
-      ...endPosition,
-    }
-
-
-    // Stop previous animation
-
-    if (animationRef.current !== null) {
-      cancelAnimationFrame(
-        animationRef.current
-      )
-
-      animationRef.current = null
-    }
-
-
+    const startLat = previousPositionRef.current.lat
+    const startLng = previousPositionRef.current.lng
+    const duration = 900
     const startTime = performance.now()
 
-    const duration = 900
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current)
+    }
 
-
-    function animate(currentTime) {
-      const elapsed =
-        currentTime - startTime
-
+    const animate = (currentTime) => {
       const progress = Math.min(
-        elapsed / duration,
+        (currentTime - startTime) / duration,
         1
       )
-
-
-      // Ease in / ease out
 
       const eased =
         progress < 0.5
           ? 2 * progress * progress
-          : 1 -
-            Math.pow(
-              -2 * progress + 2,
-              2
-            ) /
-              2
-
-
-      const currentLat =
-        startPosition.lat +
-        (endPosition.lat -
-          startPosition.lat) *
-          eased
-
-
-      const currentLng =
-        startPosition.lng +
-        (endPosition.lng -
-          startPosition.lng) *
-          eased
-
+          : 1 - Math.pow(-2 * progress + 2, 2) / 2
 
       marker.setLatLng([
-        currentLat,
-        currentLng,
+        startLat + (targetLat - startLat) * eased,
+        startLng + (targetLng - startLng) * eased,
       ])
-
 
       if (progress < 1) {
         animationRef.current =
-          requestAnimationFrame(
-            animate
-          )
-      } else {
-        animationRef.current = null
+          requestAnimationFrame(animate)
       }
     }
-
 
     animationRef.current =
-      requestAnimationFrame(
-        animate
-      )
+      requestAnimationFrame(animate)
 
-
-    // Cleanup
+    previousPositionRef.current = {
+      lat: targetLat,
+      lng: targetLng,
+    }
 
     return () => {
-      if (animationRef.current !== null) {
-        cancelAnimationFrame(
-          animationRef.current
-        )
-
-        animationRef.current = null
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [latitude, longitude])
+  }, [position])
 
+  if (!position) return null
 
-  // ----------------------------------------------------
-  // Component cleanup
-  // ----------------------------------------------------
+  const speed =
+    typeof ship.speed_knots === 'number'
+      ? `${ship.speed_knots} kn`
+      : 'N/A'
 
-  useEffect(() => {
-    return () => {
-      if (animationRef.current !== null) {
-        cancelAnimationFrame(
-          animationRef.current
-        )
+  const fuel =
+    typeof ship.fuel_tons === 'number'
+      ? `${ship.fuel_tons.toLocaleString(undefined, {
+          maximumFractionDigits: 1,
+        })} t`
+      : 'N/A'
 
-        animationRef.current = null
-      }
-    }
-  }, [])
-
-
-  // ----------------------------------------------------
-  // Invalid position
-  // ----------------------------------------------------
-
-  if (!hasValidPosition) {
-    return null
-  }
-
-
-  // ----------------------------------------------------
-  // Marker
-  // ----------------------------------------------------
+  const heading =
+    typeof ship.heading === 'number'
+      ? `${ship.heading.toFixed(1)}°`
+      : 'N/A'
 
   return (
     <Marker
       ref={markerRef}
       position={[
-        latitude,
-        longitude,
+        Number(position.lat),
+        Number(position.lng),
       ]}
-      icon={icon}
+      icon={createShipIcon(ship, breached)}
     >
-
-      <Popup>
-
+      <Popup maxWidth={230} minWidth={210}>
         <div
           style={{
-            minWidth: '240px',
-            fontFamily:
-              'Arial, sans-serif',
-            lineHeight: '1.5',
+            width: '210px',
+            fontFamily: 'Arial, sans-serif',
+            color: '#111827',
+            fontSize: '12px',
           }}
         >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottom: '1px solid #e5e7eb',
+              paddingBottom: '7px',
+              marginBottom: '7px',
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: '16px',
+                  fontWeight: '700',
+                }}
+              >
+                🚢 {ship.name || 'Unknown'}
+              </div>
+
+              <div
+                style={{
+                  color: '#6b7280',
+                  fontSize: '10px',
+                  marginTop: '2px',
+                }}
+              >
+                {ship.id || 'N/A'} • {getStatusLabel(ship.status)}
+              </div>
+            </div>
+          </div>
 
           <div
             style={{
-              fontSize: '17px',
-              fontWeight: '700',
-              marginBottom: '10px',
-              borderBottom:
-                '1px solid #ddd',
-              paddingBottom: '7px',
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '6px 12px',
             }}
           >
-            🚢 {ship.name || 'Unknown Ship'}
+            <div>
+              <span style={{ color: '#6b7280' }}>
+                Destination
+              </span>
+              <br />
+              <strong>
+                {ship.destination || 'N/A'}
+              </strong>
+            </div>
+
+            <div>
+              <span style={{ color: '#6b7280' }}>
+                Speed
+              </span>
+              <br />
+              <strong>{speed}</strong>
+            </div>
+
+            <div>
+              <span style={{ color: '#6b7280' }}>
+                Heading
+              </span>
+              <br />
+              <strong>{heading}</strong>
+            </div>
+
+            <div>
+              <span style={{ color: '#6b7280' }}>
+                Cargo
+              </span>
+              <br />
+              <strong>{ship.cargo || 'N/A'}</strong>
+            </div>
+
+            <div>
+              <span style={{ color: '#6b7280' }}>
+                Fuel
+              </span>
+              <br />
+              <strong>{fuel}</strong>
+            </div>
           </div>
 
-
-          <div>
-            <strong>Ship ID:</strong>{' '}
-            {ship.id || 'N/A'}
+          <div
+            style={{
+              borderTop: '1px solid #e5e7eb',
+              marginTop: '8px',
+              paddingTop: '7px',
+              color: '#4b5563',
+              fontSize: '10px',
+            }}
+          >
+            📍 {Number(position.lat).toFixed(5)},{' '}
+            {Number(position.lng).toFixed(5)}
           </div>
 
-
-          <div>
-            <strong>Status:</strong>{' '}
-
-            <span
+          {breached && (
+            <div
               style={{
-                color:
-                  getStatusColor(
-                    ship.status
-                  ),
+                marginTop: '7px',
+                padding: '6px',
+                background: '#fee2e2',
+                color: '#b91c1c',
+                borderRadius: '4px',
+                textAlign: 'center',
                 fontWeight: '700',
+                fontSize: '10px',
               }}
             >
-              {getStatusLabel(
-                ship.status
-              )}
-            </span>
-          </div>
-
-
-          <div>
-            <strong>Cargo:</strong>{' '}
-            {ship.cargo || 'N/A'}
-          </div>
-
-
-          <div>
-            <strong>Destination:</strong>{' '}
-            {ship.destination ||
-              'N/A'}
-          </div>
-
-
-          <div>
-            <strong>
-              Fuel Remaining:
-            </strong>{' '}
-            {getFuelText(ship)}
-          </div>
-
-
-          <div>
-            <strong>Speed:</strong>{' '}
-
-            {typeof ship.speed_knots ===
-            'number'
-              ? `${ship.speed_knots} kn`
-              : 'N/A'}
-          </div>
-
-
-          <div>
-            <strong>Heading:</strong>{' '}
-
-            {typeof ship.heading ===
-            'number'
-              ? `${ship.heading}°`
-              : 'N/A'}
-          </div>
-
-
-          <div>
-            <strong>Latitude:</strong>{' '}
-
-            {latitude.toFixed(5)}
-          </div>
-
-
-          <div>
-            <strong>Longitude:</strong>{' '}
-
-            {longitude.toFixed(5)}
-          </div>
-
+              ⚠ RESTRICTED ZONE BREACH
+            </div>
+          )}
         </div>
-
       </Popup>
-
     </Marker>
   )
 }
 
 
-// ======================================================
-// MAIN MAP
-// ======================================================
+// ============================================================
+// RESTRICTED ZONE DRAWER
+// ============================================================
+
+function RestrictedZoneDrawer({
+  onZoneCreated,
+  onZoneDeleted,
+}) {
+  const map = useMap()
+
+  useEffect(() => {
+    const drawnItems = new L.FeatureGroup()
+
+    map.addLayer(drawnItems)
+
+    const drawControl = new L.Control.Draw({
+      position: 'topright',
+
+      draw: {
+        rectangle: false,
+        circle: false,
+        circlemarker: false,
+        marker: false,
+        polyline: false,
+
+        polygon: {
+          allowIntersection: false,
+          showArea: true,
+
+          shapeOptions: {
+            color: '#ef4444',
+            fillColor: '#ef4444',
+            fillOpacity: 0.18,
+            weight: 2,
+          },
+        },
+      },
+
+      edit: {
+        featureGroup: drawnItems,
+        edit: false,
+        remove: true,
+      },
+    })
+
+    map.addControl(drawControl)
+
+    const handleCreated = (event) => {
+      if (event.layerType !== 'polygon') return
+
+      drawnItems.clearLayers()
+      drawnItems.addLayer(event.layer)
+
+      const coordinates = event.layer
+        .getLatLngs()[0]
+        .map((point) => [
+          point.lat,
+          point.lng,
+        ])
+
+      onZoneCreated(coordinates)
+    }
+
+    const handleDeleted = () => {
+      drawnItems.clearLayers()
+      onZoneDeleted()
+    }
+
+    map.on(L.Draw.Event.CREATED, handleCreated)
+    map.on(L.Draw.Event.DELETED, handleDeleted)
+
+    return () => {
+      map.off(L.Draw.Event.CREATED, handleCreated)
+      map.off(L.Draw.Event.DELETED, handleDeleted)
+      map.removeControl(drawControl)
+      map.removeLayer(drawnItems)
+    }
+  }, [map, onZoneCreated, onZoneDeleted])
+
+  return null
+}
+
+
+// ============================================================
+// MAIN FLEET MAP
+// ============================================================
 
 export default function FleetMap({
   ships,
+  onZoneBreachesChange,
 }) {
+  const [restrictedZone, setRestrictedZone] =
+    useState(null)
+
+  const [zoneName, setZoneName] =
+    useState('Restricted Zone')
+
+  const [zoneSaved, setZoneSaved] =
+    useState(false)
+
+  const [zonePanelOpen, setZonePanelOpen] =
+    useState(false)
+
+  const handleZoneCreated = useCallback(
+    (coordinates) => {
+      setRestrictedZone(coordinates)
+      setZoneSaved(false)
+    },
+    []
+  )
+
+  const handleZoneDeleted = useCallback(() => {
+    setRestrictedZone(null)
+    setZoneSaved(false)
+  }, [])
+
+  const handleSaveZone = () => {
+    if (!restrictedZone) return
+
+    setZoneSaved(true)
+
+    console.log('Restricted zone saved:', {
+      name: zoneName,
+      coordinates: restrictedZone,
+    })
+  }
+
+  const breachedShips = ships.filter((ship) => {
+    if (!ship.position || !restrictedZone) {
+      return false
+    }
+
+    return isPointInsidePolygon(
+      Number(ship.position.lat),
+      Number(ship.position.lng),
+      restrictedZone
+    )
+  })
+
+  const breachedIds = new Set(
+    breachedShips.map(
+      (ship) => ship.id || ship.name
+    )
+  )
+
+  // ==========================================================
+  // SEND BREACHES TO APP / CRISIS CENTER
+  // ==========================================================
+
+  const breachPayload = breachedShips.map((ship) => ({
+    shipId: ship.id || ship.name,
+    shipName: ship.name || 'Unknown Vessel',
+    zoneName: zoneName || 'Restricted Zone',
+    position: {
+      lat: Number(ship.position.lat),
+      lng: Number(ship.position.lng),
+    },
+    status: 'active',
+  }))
+
+  const breachSignature = JSON.stringify(
+    breachPayload
+  )
+
+  useEffect(() => {
+    onZoneBreachesChange?.(breachPayload)
+  }, [
+    breachSignature,
+    onZoneBreachesChange,
+  ])
+
   return (
     <div
       style={{
+        position: 'relative',
         width: '100%',
-        height: '300px',
-        borderRadius: '12px',
-        overflow: 'hidden',
+        height: '100%',
       }}
     >
-
       <MapContainer
-        center={[
-          26.53,
-          56.21,
-        ]}
-        zoom={8}
-        scrollWheelZoom={true}
+        center={[26.5, 56.2]}
+        zoom={6}
+        scrollWheelZoom
         style={{
           width: '100%',
           height: '100%',
+          minHeight: '300px',
         }}
       >
-
         <TileLayer
-          attribution="&copy; Esri, HERE, Garmin, (c) OpenStreetMap contributors, and the GIS user community"
-          url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
+          attribution="&copy; OpenStreetMap contributors"
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
+        <MapInitialView ships={ships} />
 
-        <MapInitialView
-          ships={ships}
+        <RestrictedZoneDrawer
+          onZoneCreated={handleZoneCreated}
+          onZoneDeleted={handleZoneDeleted}
         />
 
-
-        {ships.map(
-          (ship, index) => (
-            <AnimatedShipMarker
-              key={
-                ship.id ||
-                ship.name ||
-                `ship-${index}`
-              }
-              ship={ship}
-              index={index}
-            />
-          )
+        {restrictedZone && (
+          <Polygon
+            positions={restrictedZone}
+            pathOptions={{
+              color: '#ef4444',
+              fillColor: '#ef4444',
+              fillOpacity: 0.16,
+              weight: 2,
+            }}
+          />
         )}
 
+        {ships.map((ship, index) => {
+          if (!ship.position) return null
+
+          const key =
+            ship.id ||
+            ship.name ||
+            `ship-${index}`
+
+          return (
+            <AnimatedShipMarker
+              key={key}
+              ship={ship}
+              breached={breachedIds.has(key)}
+            />
+          )
+        })}
       </MapContainer>
 
+      {/* ======================================================
+          RESTRICTED ZONE CONTROL
+      ====================================================== */}
+
+      {!zonePanelOpen ? (
+        <button
+          onClick={() => setZonePanelOpen(true)}
+          title="Restricted Zone"
+          style={{
+            position: 'absolute',
+            left: '12px',
+            bottom: '12px',
+            zIndex: 1000,
+            width: '42px',
+            height: '42px',
+            borderRadius: '9px',
+            border: '1px solid #ef4444',
+            background: '#111827',
+            color: '#ef4444',
+            fontSize: '20px',
+            cursor: 'pointer',
+            boxShadow: '0 3px 12px rgba(0,0,0,.35)',
+          }}
+        >
+          ⚠️
+        </button>
+      ) : (
+        <div
+          style={{
+            position: 'absolute',
+            left: '12px',
+            bottom: '12px',
+            zIndex: 1000,
+            width: '180px',
+            padding: '10px',
+            background: 'rgba(10,18,30,.94)',
+            border: '1px solid #374151',
+            borderRadius: '8px',
+            color: 'white',
+            boxShadow: '0 4px 15px rgba(0,0,0,.35)',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '7px',
+            }}
+          >
+            <span
+              style={{
+                fontSize: '10px',
+                fontWeight: '700',
+              }}
+            >
+              ⚠ RESTRICTED ZONE
+            </span>
+
+            <button
+              onClick={() => setZonePanelOpen(false)}
+              title="Minimize"
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: '#9ca3af',
+                cursor: 'pointer',
+                fontSize: '17px',
+                padding: '0 3px',
+              }}
+            >
+              −
+            </button>
+          </div>
+
+          <input
+            value={zoneName}
+            onChange={(e) =>
+              setZoneName(e.target.value)
+            }
+            placeholder="Zone name"
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: '6px',
+              marginBottom: '6px',
+              borderRadius: '4px',
+              border: '1px solid #4b5563',
+              background: '#111827',
+              color: 'white',
+              fontSize: '11px',
+            }}
+          />
+
+          <button
+            onClick={handleSaveZone}
+            disabled={!restrictedZone}
+            style={{
+              width: '100%',
+              padding: '6px',
+              border: 'none',
+              borderRadius: '4px',
+              background: restrictedZone
+                ? '#dc2626'
+                : '#374151',
+              color: 'white',
+              fontSize: '10px',
+              fontWeight: '700',
+              cursor: restrictedZone
+                ? 'pointer'
+                : 'not-allowed',
+            }}
+          >
+            SAVE ZONE
+          </button>
+
+          {restrictedZone && (
+            <div
+              style={{
+                marginTop: '6px',
+                fontSize: '10px',
+                color: breachedShips.length
+                  ? '#fca5a5'
+                  : '#9ca3af',
+              }}
+            >
+              {breachedShips.length
+                ? `⚠ ${breachedShips.length} vessel inside`
+                : '✓ No vessels inside'}
+            </div>
+          )}
+
+          {zoneSaved && (
+            <div
+              style={{
+                marginTop: '4px',
+                fontSize: '9px',
+                color: '#4ade80',
+              }}
+            >
+              ✓ Saved
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
