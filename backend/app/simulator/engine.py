@@ -7,8 +7,30 @@ from app.schemas.fleet import Fleet
 
 
 class FleetSimulator:
+    """
+    Simulates fleet movement, fuel consumption, and basic operational risk.
+
+    Fuel consumption is intentionally a configurable simulation value rather
+    than a real-world maritime fuel-burn model.
+    """
+
+    # Simulation fuel consumption:
+    # tons consumed per hour at 1 knot of speed.
+    FUEL_BURN_PER_KNOT_HOUR = 0.12
+
+    WARNING_FUEL_PERCENT = 30.0
+    CRITICAL_FUEL_PERCENT = 15.0
+    INSUFFICIENT_FUEL_PERCENT = 5.0
+
     def __init__(self):
         self.fleet: Fleet = get_initial_fleet()
+
+        # Keep each vessel's initial fuel so remaining fuel can be represented
+        # as a percentage during the simulation.
+        self.initial_fuel = {
+            ship.id: ship.fuel_tons
+            for ship in self.fleet.ships
+        }
 
         # Calculate an initial route for every ship.
         for ship in self.fleet.ships:
@@ -49,6 +71,91 @@ class FleetSimulator:
         )
 
         return (bearing + 360) % 360
+
+    def get_fuel_percent(self, ship) -> float:
+        """Return the vessel's remaining fuel as a percentage."""
+
+        starting_fuel = self.initial_fuel.get(
+            ship.id,
+            ship.fuel_tons,
+        )
+
+        if starting_fuel <= 0:
+            return 0.0
+
+        return max(
+            0.0,
+            min(
+                100.0,
+                (ship.fuel_tons / starting_fuel) * 100,
+            ),
+        )
+
+    def consume_fuel(
+        self,
+        ship,
+        delta_seconds: float,
+    ):
+        """
+        Reduce fuel according to simulated speed and elapsed time.
+
+        This is a project simulation rate, not a real-world fuel model.
+        """
+
+        if ship.speed_knots <= 0:
+            return
+
+        if ship.status in {
+            "stopped",
+            "stranded",
+            "arrived",
+        }:
+            return
+
+        hours = max(delta_seconds, 0.0) / 3600.0
+
+        fuel_used = (
+            ship.speed_knots
+            * self.FUEL_BURN_PER_KNOT_HOUR
+            * hours
+        )
+
+        ship.fuel_tons = max(
+            0.0,
+            ship.fuel_tons - fuel_used,
+        )
+
+    def evaluate_risk(self, ship):
+        """
+        Evaluate fuel-based operational risk.
+
+        Existing hard operational states such as stranded/stopped/arrived
+        are preserved. Normal/warning/critical/insufficient_fuel are derived
+        from remaining fuel.
+        """
+
+        if ship.status in {
+            "stranded",
+            "stopped",
+            "arrived",
+            "rerouting",
+            "distressed",
+        }:
+            return
+
+        fuel_percent = self.get_fuel_percent(ship)
+
+        if fuel_percent <= self.INSUFFICIENT_FUEL_PERCENT:
+            ship.status = "insufficient_fuel"
+
+        elif fuel_percent <= self.CRITICAL_FUEL_PERCENT:
+            ship.status = "critical"
+
+        elif fuel_percent <= self.WARNING_FUEL_PERCENT:
+            ship.status = "warning"
+
+        else:
+            ship.status = "normal"
 
     def update_ship_position(
         self,
@@ -156,6 +263,13 @@ class FleetSimulator:
                 ship,
                 delta_seconds,
             )
+
+            self.consume_fuel(
+                ship,
+                delta_seconds,
+            )
+
+            self.evaluate_risk(ship)
 
     async def run(self):
         self.running = True
