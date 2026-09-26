@@ -12,11 +12,16 @@ class Ship(BaseModel):
     id: str
     name: str
     position: Position
+
     speed_knots: float = Field(ge=0)
     heading: float = Field(ge=0, lt=360)
+
     destination: str
+
     fuel_tons: float = Field(ge=0)
+
     cargo: str
+
     status: Literal[
         "normal",
         "warning",
@@ -31,6 +36,10 @@ class Ship(BaseModel):
 
     route: list[Position] = []
     route_index: int = 0
+
+    # True when operator manually changes the vessel heading.
+    manual_heading: bool = False
+
 
 class Fleet(BaseModel):
     ships: list[Ship]

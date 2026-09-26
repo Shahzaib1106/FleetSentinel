@@ -7,10 +7,12 @@ import {
 } from 'react'
 
 import FleetPage from './FleetPage'
+import DispatchPage from './DispatchPage'
 import AnalyticsPage from './AnalyticsPage'
 import './App.css'
 import { useFleetSocket } from './hooks/useFleetSocket'
 import FleetMap from './FleetMap'
+import './AppShell.css'
 
 /* ============================================================
    INCIDENT STORE
@@ -135,6 +137,12 @@ function App() {
 
   const [incidentHistory, setIncidentHistory] =
     useState([])
+
+  const [backendIncidents, setBackendIncidents] =
+    useState([])
+
+  const [dispatchVesselId, setDispatchVesselId] =
+    useState('')
 
   const {
     ships,
@@ -355,18 +363,98 @@ function App() {
     useIncidentRecords()
 
   /* ============================================================
+     BACKEND INCIDENT SYNC
+  ============================================================ */
+
+  const refreshBackendIncidents = useCallback(
+    async () => {
+      try {
+        const response = await fetch(
+          'http://127.0.0.1:8000/api/dispatch/incidents'
+        )
+
+        if (!response.ok) {
+          throw new Error(
+            `Incident API returned ${response.status}`
+          )
+        }
+
+        const data = await response.json()
+        setBackendIncidents(
+          Array.isArray(data)
+            ? data
+            : Array.isArray(data?.incidents)
+              ? data.incidents
+              : []
+        )
+      } catch (error) {
+        console.warn(
+          'Backend incident sync failed:',
+          error
+        )
+      }
+    },
+    []
+  )
+
+  useEffect(() => {
+    const initialSync = setTimeout(
+      refreshBackendIncidents,
+      0
+    )
+
+    const interval = setInterval(
+      refreshBackendIncidents,
+      5000
+    )
+
+    return () => {
+      clearTimeout(initialSync)
+      clearInterval(interval)
+    }
+  }, [refreshBackendIncidents])
+
+  /* ============================================================
      ACTIVE INCIDENTS
   ============================================================ */
 
   const activeIncidents = useMemo(() => {
-    return incidentRecords.filter(
-      (incident) =>
-        !dismissedIncidents.has(
-          incident.id
+    const liveMap = new Map(
+      incidentRecords.map((incident) => [
+        incident.id,
+        incident,
+      ])
+    )
+
+    backendIncidents.forEach((incident) => {
+      const existing = liveMap.get(incident.id)
+
+      liveMap.set(
+        incident.id,
+        existing
+          ? { ...existing, ...incident }
+          : incident
+      )
+    })
+
+    return Array.from(liveMap.values()).filter(
+      (incident) => {
+        const state = String(
+          incident.responseState ||
+          incident.status ||
+          ''
+        ).toUpperCase()
+
+        return (
+          !dismissedIncidents.has(incident.id) &&
+          state !== 'RESOLVED' &&
+          state !== 'DISMISSED'
         )
+      }
     )
   }, [
     incidentRecords,
+    backendIncidents,
     dismissedIncidents,
   ])
 
@@ -378,24 +466,33 @@ function App() {
   ============================================================ */
 
   const acknowledgeIncident = useCallback(
-    (incident) => {
-      if (
-        acknowledgedIncidents.has(
-          incident.id
+    async (incident) => {
+      try {
+        await fetch(
+          'http://127.0.0.1:8000/api/dispatch/incident/action',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              incident_id: incident.id,
+              action: 'ACKNOWLEDGE',
+              operator: 'COMMAND OPERATOR',
+            }),
+          }
         )
-      ) {
-        return
+      } catch (error) {
+        console.warn(
+          'Acknowledge request failed:',
+          error
+        )
       }
 
       setAcknowledgedIncidents(
         (previous) => {
-          const next =
-            new Set(previous)
-
-          next.add(
-            incident.id
-          )
-
+          const next = new Set(previous)
+          next.add(incident.id)
           return next
         }
       )
@@ -404,16 +501,16 @@ function App() {
         (previous) => [
           {
             ...incident,
-            action:
-              'ACKNOWLEDGED',
-            timestamp:
-              new Date(),
+            action: 'ACKNOWLEDGED',
+            timestamp: new Date(),
           },
           ...previous,
         ]
       )
+
+      refreshBackendIncidents()
     },
-    [acknowledgedIncidents]
+    [refreshBackendIncidents]
   )
 
   /* ============================================================
@@ -421,24 +518,33 @@ function App() {
   ============================================================ */
 
   const dismissIncident = useCallback(
-    (incident) => {
-      if (
-        dismissedIncidents.has(
-          incident.id
+    async (incident) => {
+      try {
+        await fetch(
+          'http://127.0.0.1:8000/api/dispatch/incident/action',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              incident_id: incident.id,
+              action: 'DISMISS',
+              operator: 'COMMAND OPERATOR',
+            }),
+          }
         )
-      ) {
-        return
+      } catch (error) {
+        console.warn(
+          'Dismiss request failed:',
+          error
+        )
       }
 
       setDismissedIncidents(
         (previous) => {
-          const next =
-            new Set(previous)
-
-          next.add(
-            incident.id
-          )
-
+          const next = new Set(previous)
+          next.add(incident.id)
           return next
         }
       )
@@ -447,16 +553,26 @@ function App() {
         (previous) => [
           {
             ...incident,
-            action:
-              'DISMISSED',
-            timestamp:
-              new Date(),
+            action: 'DISMISSED',
+            timestamp: new Date(),
           },
           ...previous,
         ]
       )
+
+      refreshBackendIncidents()
     },
-    [dismissedIncidents]
+    [refreshBackendIncidents]
+  )
+
+  const dispatchIncident = useCallback(
+    (incident) => {
+      setDispatchVesselId(
+        incident.vesselId || ''
+      )
+      setActivePage('Dispatch')
+    },
+    []
   )
 
   /* ============================================================
@@ -509,18 +625,13 @@ function App() {
 
         <div className="logo-area">
 
-          <div className="logo-mark">
-            <span>FC</span>
+          <div className="brand-logo" aria-label="Fleet Sentinel">
+            <span>FS</span>
           </div>
 
-          <div>
-            <h2>
-              FLEET CRISIS
-            </h2>
-
-            <p>
-              COMMAND CENTER
-            </p>
+          <div className="brand-copy">
+            <h2>FLEET SENTINEL</h2>
+            <p>MARITIME CRISIS COMMAND</p>
           </div>
 
         </div>
@@ -1037,6 +1148,19 @@ function App() {
                                     ).toUpperCase()}
                               </span>
 
+                              {incident.responseState && (
+                                <span
+                                  style={{
+                                    marginLeft: '6px',
+                                    color: '#38bdf8',
+                                  }}
+                                >
+                                  {String(
+                                    incident.responseState
+                                  ).toUpperCase()}
+                                </span>
+                              )}
+
                             </div>
 
                             <p>
@@ -1166,6 +1290,31 @@ function App() {
                                 }}
                               >
                                 DISMISS
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  dispatchIncident(
+                                    incident
+                                  )
+                                }
+                                style={{
+                                  border:
+                                    '1px solid #38bdf8',
+                                  background:
+                                    'rgba(56,189,248,.12)',
+                                  color:
+                                    '#38bdf8',
+                                  borderRadius:
+                                    '4px',
+                                  padding:
+                                    '5px 8px',
+                                  fontSize: '9px',
+                                  fontWeight: '700',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                DISPATCH VESSEL →
                               </button>
 
                             </div>
@@ -1313,6 +1462,18 @@ function App() {
 
             </section>
 
+          </div>
+
+        ) : activePage === 'Dispatch' ? (
+
+          <div className="dashboard-content dispatch-route-content">
+            <DispatchPage
+              ships={ships}
+              selectedVesselId={dispatchVesselId}
+              onSelectedVesselHandled={() =>
+                setDispatchVesselId('')
+              }
+            />
           </div>
 
         ) : activePage === 'Analytics' ? (
