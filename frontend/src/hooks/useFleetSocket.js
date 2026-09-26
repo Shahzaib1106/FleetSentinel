@@ -8,44 +8,99 @@ export function useFleetSocket() {
   const [ships, setShips] = useState([])
   const [connected, setConnected] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(null)
+  const [zones, setZones] = useState([])
+  const [alerts, setAlerts] = useState([])
 
   const socketRef = useRef(null)
+  const reconnectTimerRef = useRef(null)
+  const reconnectAttemptsRef = useRef(0)
+  const isUnmountedRef = useRef(false)
 
   useEffect(() => {
-    const socket = new WebSocket(WS_URL)
+    isUnmountedRef.current = false
 
-    socketRef.current = socket
+    const connect = () => {
+      if (isUnmountedRef.current) return
 
-    socket.onopen = () => {
-      console.log('Fleet WebSocket connected')
-      setConnected(true)
-    }
+      // Don't create another socket if one is already active.
+      if (
+        socketRef.current &&
+        (socketRef.current.readyState === WebSocket.OPEN ||
+          socketRef.current.readyState === WebSocket.CONNECTING)
+      ) {
+        return
+      }
 
-    socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
+      console.log('Connecting Fleet WebSocket...')
 
-        if (data.type === 'fleet_update') {
-          setShips(data.ships || [])
-          setLastUpdate(new Date())
+      const socket = new WebSocket(WS_URL)
+      socketRef.current = socket
+
+      socket.onopen = () => {
+        if (isUnmountedRef.current) return
+
+        console.log('Fleet WebSocket connected')
+        setConnected(true)
+        reconnectAttemptsRef.current = 0
+      }
+
+      socket.onmessage = (event) => {
+        if (isUnmountedRef.current) return
+
+        try {
+          const data = JSON.parse(event.data)
+
+          if (data.type === 'fleet_update') {
+            setShips(Array.isArray(data.ships) ? data.ships : [])
+            setZones(Array.isArray(data.zones) ? data.zones : [])
+            setAlerts(Array.isArray(data.alerts) ? data.alerts : [])
+            setLastUpdate(new Date())
+          }
+        } catch (error) {
+          console.error('Invalid WebSocket message:', error)
         }
-      } catch (error) {
-        console.error('Invalid WebSocket message:', error)
+      }
+
+      socket.onerror = (error) => {
+        console.error('Fleet WebSocket error:', error)
+        setConnected(false)
+      }
+
+      socket.onclose = () => {
+        if (isUnmountedRef.current) return
+
+        console.log('Fleet WebSocket disconnected')
+        setConnected(false)
+        socketRef.current = null
+
+        reconnectAttemptsRef.current += 1
+
+        const delay = Math.min(
+          1000 * 2 ** (reconnectAttemptsRef.current - 1),
+          10000
+        )
+
+        console.log(`Reconnecting Fleet WebSocket in ${delay}ms...`)
+
+        clearTimeout(reconnectTimerRef.current)
+
+        reconnectTimerRef.current = setTimeout(() => {
+          connect()
+        }, delay)
       }
     }
 
-    socket.onclose = () => {
-      console.log('Fleet WebSocket disconnected')
-      setConnected(false)
-    }
-
-    socket.onerror = (error) => {
-      console.error('Fleet WebSocket error:', error)
-      setConnected(false)
-    }
+    connect()
 
     return () => {
-      socket.close()
+      isUnmountedRef.current = true
+
+      clearTimeout(reconnectTimerRef.current)
+
+      if (socketRef.current) {
+        socketRef.current.close()
+        socketRef.current = null
+      }
     }
   }, [])
 
@@ -53,5 +108,7 @@ export function useFleetSocket() {
     ships,
     connected,
     lastUpdate,
+    zones,
+    alerts,
   }
 }

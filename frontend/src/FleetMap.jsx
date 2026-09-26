@@ -10,7 +10,7 @@ import {
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-draw/dist/leaflet.draw.css'
-import 'leaflet-draw'
+import 'leaflet-draw/dist/leaflet.draw.js'
 
 import {
   useCallback,
@@ -181,7 +181,9 @@ function MapInitialView({ ships }) {
 // ============================================================
 
 function isPointInsidePolygon(lat, lng, polygon) {
-  if (!polygon || polygon.length < 3) return false
+  if (!Array.isArray(polygon) || polygon.length < 3) {
+    return false
+  }
 
   let inside = false
 
@@ -190,10 +192,10 @@ function isPointInsidePolygon(lat, lng, polygon) {
     i < polygon.length;
     j = i++
   ) {
-    const xi = polygon[i][1]
-    const yi = polygon[i][0]
-    const xj = polygon[j][1]
-    const yj = polygon[j][0]
+    const xi = Number(polygon[i][1])
+    const yi = Number(polygon[i][0])
+    const xj = Number(polygon[j][1])
+    const yj = Number(polygon[j][0])
 
     const intersect =
       yi > lat !== yj > lat &&
@@ -202,7 +204,9 @@ function isPointInsidePolygon(lat, lng, polygon) {
           (yj - yi) +
           xi
 
-    if (intersect) inside = !inside
+    if (intersect) {
+      inside = !inside
+    }
   }
 
   return inside
@@ -259,6 +263,7 @@ function AnimatedShipMarker({ ship, breached }) {
 
     const startLat = previousPositionRef.current.lat
     const startLng = previousPositionRef.current.lng
+
     const duration = 900
     const startTime = performance.now()
 
@@ -275,7 +280,9 @@ function AnimatedShipMarker({ ship, breached }) {
       const eased =
         progress < 0.5
           ? 2 * progress * progress
-          : 1 - Math.pow(-2 * progress + 2, 2) / 2
+          : 1 -
+            Math.pow(-2 * progress + 2, 2) /
+              2
 
       marker.setLatLng([
         startLat + (targetLat - startLat) * eased,
@@ -461,6 +468,7 @@ function AnimatedShipMarker({ ship, breached }) {
 
 function RestrictedZoneDrawer({
   onZoneCreated,
+  onZoneEdited,
   onZoneDeleted,
 }) {
   const map = useMap()
@@ -495,8 +503,6 @@ function RestrictedZoneDrawer({
 
       edit: {
         featureGroup: drawnItems,
-        edit: false,
-        remove: true,
       },
     })
 
@@ -508,14 +514,39 @@ function RestrictedZoneDrawer({
       drawnItems.clearLayers()
       drawnItems.addLayer(event.layer)
 
-      const coordinates = event.layer
-        .getLatLngs()[0]
+      const latLngs = event.layer.getLatLngs()
+
+      if (!latLngs || !latLngs[0]) return
+
+      const coordinates = latLngs[0]
         .map((point) => [
-          point.lat,
-          point.lng,
+          Number(point.lat),
+          Number(point.lng),
         ])
 
-      onZoneCreated(coordinates)
+      if (coordinates.length >= 3) {
+        onZoneCreated(coordinates)
+      }
+    }
+
+    const handleEdited = (event) => {
+      event.layers.eachLayer((layer) => {
+        if (!layer.getLatLngs) return
+
+        const latLngs = layer.getLatLngs()
+
+        if (!latLngs || !latLngs[0]) return
+
+        const coordinates = latLngs[0]
+          .map((point) => [
+            Number(point.lat),
+            Number(point.lng),
+          ])
+
+        if (coordinates.length >= 3) {
+          onZoneEdited?.(coordinates)
+        }
+      })
     }
 
     const handleDeleted = () => {
@@ -523,16 +554,46 @@ function RestrictedZoneDrawer({
       onZoneDeleted()
     }
 
-    map.on(L.Draw.Event.CREATED, handleCreated)
-    map.on(L.Draw.Event.DELETED, handleDeleted)
+    map.on(
+      L.Draw.Event.CREATED,
+      handleCreated
+    )
+
+    map.on(
+      L.Draw.Event.EDITED,
+      handleEdited
+    )
+
+    map.on(
+      L.Draw.Event.DELETED,
+      handleDeleted
+    )
 
     return () => {
-      map.off(L.Draw.Event.CREATED, handleCreated)
-      map.off(L.Draw.Event.DELETED, handleDeleted)
+      map.off(
+        L.Draw.Event.CREATED,
+        handleCreated
+      )
+
+      map.off(
+        L.Draw.Event.EDITED,
+        handleEdited
+      )
+
+      map.off(
+        L.Draw.Event.DELETED,
+        handleDeleted
+      )
+
       map.removeControl(drawControl)
       map.removeLayer(drawnItems)
     }
-  }, [map, onZoneCreated, onZoneDeleted])
+  }, [
+    map,
+    onZoneCreated,
+    onZoneEdited,
+    onZoneDeleted,
+  ])
 
   return null
 }
@@ -542,86 +603,262 @@ function RestrictedZoneDrawer({
 // ============================================================
 
 export default function FleetMap({
-  ships,
+  ships = [],
+  zones = [],
   onZoneBreachesChange,
 }) {
-  const [restrictedZone, setRestrictedZone] =
-    useState(null)
+  const initialZone = useMemo(() => {
+    if (
+      !Array.isArray(zones) ||
+      zones.length === 0
+    ) {
+      return null
+    }
+
+    const zone = zones[0]
+
+    if (
+      zone &&
+      Array.isArray(zone.coordinates) &&
+      zone.coordinates.length >= 3
+    ) {
+      return zone
+    }
+
+    return null
+  }, [zones])
+
+  const [
+    restrictedZone,
+    setRestrictedZone,
+  ] = useState(
+    () => initialZone?.coordinates ?? null
+  )
 
   const [zoneName, setZoneName] =
-    useState('Restricted Zone')
+    useState(
+      () =>
+        initialZone?.name ||
+        initialZone?.id ||
+        'Restricted Zone'
+    )
 
   const [zoneSaved, setZoneSaved] =
-    useState(false)
+    useState(Boolean(initialZone))
+
+  const [activeZoneId, setActiveZoneId] =
+    useState(
+      () => initialZone?.id ?? null
+    )
+
+  const API_BASE =
+    import.meta.env.VITE_API_URL ||
+    'http://127.0.0.1:8000'
 
   const [zonePanelOpen, setZonePanelOpen] =
     useState(false)
 
+  // ----------------------------------------------------------
+  // CREATE ZONE
+  // ----------------------------------------------------------
+
   const handleZoneCreated = useCallback(
     (coordinates) => {
+      if (
+        !Array.isArray(coordinates) ||
+        coordinates.length < 3
+      ) {
+        return
+      }
+
+      setRestrictedZone(coordinates)
+      setZoneSaved(false)
+      setActiveZoneId(null)
+    },
+    []
+  )
+
+  // ----------------------------------------------------------
+  // EDIT ZONE
+  // ----------------------------------------------------------
+
+  const handleZoneEdited = useCallback(
+    (coordinates) => {
+      if (
+        !Array.isArray(coordinates) ||
+        coordinates.length < 3
+      ) {
+        return
+      }
+
       setRestrictedZone(coordinates)
       setZoneSaved(false)
     },
     []
   )
 
-  const handleZoneDeleted = useCallback(() => {
-    setRestrictedZone(null)
-    setZoneSaved(false)
-  }, [])
+  // ----------------------------------------------------------
+  // DELETE ZONE
+  // ----------------------------------------------------------
 
-  const handleSaveZone = () => {
-    if (!restrictedZone) return
+  const handleZoneDeleted = useCallback(
+    async () => {
+      if (activeZoneId) {
+        await fetch(
+          `${API_BASE}/api/dispatch/zones/${activeZoneId}`,
+          {
+            method: 'DELETE',
+          }
+        ).catch(() => {})
+      }
 
-    setZoneSaved(true)
+      setRestrictedZone(null)
+      setActiveZoneId(null)
+      setZoneSaved(false)
+    },
+    [activeZoneId, API_BASE]
+  )
 
-    console.log('Restricted zone saved:', {
-      name: zoneName,
-      coordinates: restrictedZone,
-    })
+  // ----------------------------------------------------------
+  // SAVE ZONE
+  // ----------------------------------------------------------
+
+  const handleSaveZone = async () => {
+    if (
+      !Array.isArray(restrictedZone) ||
+      restrictedZone.length < 3
+    ) {
+      return
+    }
+
+    const id =
+      activeZoneId ||
+      `ZONE-${Date.now()}`
+
+    const method =
+      activeZoneId ? 'PUT' : 'POST'
+
+    const url = activeZoneId
+      ? `${API_BASE}/api/dispatch/zones/${activeZoneId}`
+      : `${API_BASE}/api/dispatch/zones`
+
+    try {
+      const response = await fetch(url, {
+        method,
+
+        headers: {
+          'Content-Type': 'application/json',
+        },
+
+        body: JSON.stringify({
+          id,
+          name:
+            zoneName || 'Restricted Zone',
+          coordinates: restrictedZone,
+        }),
+      })
+
+      if (!response.ok) {
+        setZoneSaved(false)
+        return
+      }
+
+      setActiveZoneId(id)
+      setZoneSaved(true)
+    } catch {
+      setZoneSaved(false)
+    }
   }
 
+  // ----------------------------------------------------------
+  // BREACHED SHIPS
+  // ----------------------------------------------------------
+
   const breachedShips = useMemo(() => {
+    if (
+      !Array.isArray(ships) ||
+      !Array.isArray(restrictedZone) ||
+      restrictedZone.length < 3
+    ) {
+      return []
+    }
+
     return ships.filter((ship) => {
-      if (!ship.position || !restrictedZone) {
+      if (!ship?.position) {
+        return false
+      }
+
+      const lat = Number(ship.position.lat)
+      const lng = Number(ship.position.lng)
+
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng)
+      ) {
         return false
       }
 
       return isPointInsidePolygon(
-        Number(ship.position.lat),
-        Number(ship.position.lng),
+        lat,
+        lng,
         restrictedZone
       )
     })
   }, [ships, restrictedZone])
 
+  // ----------------------------------------------------------
+  // BREACHED IDs
+  // ----------------------------------------------------------
+
   const breachedIds = useMemo(() => {
     return new Set(
       breachedShips.map(
-        (ship) => ship.id || ship.name
+        (ship) =>
+          ship.id ||
+          ship.name
       )
     )
   }, [breachedShips])
 
+  // ----------------------------------------------------------
+  // BREACH PAYLOAD
+  // ----------------------------------------------------------
+
   const breachPayload = useMemo(() => {
     return breachedShips.map((ship) => ({
-      shipId: ship.id || ship.name,
+      shipId:
+        ship.id ||
+        ship.name,
+
       shipName:
         ship.name ||
         ship.id ||
         'Unknown Vessel',
+
       zoneName:
-        zoneName || 'Restricted Zone',
+        zoneName ||
+        'Restricted Zone',
+
       position: {
         lat: Number(ship.position.lat),
         lng: Number(ship.position.lng),
       },
-      status: 'active',
+
+      status: 'restricted_zone_breach',
     }))
-  }, [breachedShips, zoneName])
+  }, [
+    breachedShips,
+    zoneName,
+  ])
+
+  // ----------------------------------------------------------
+  // SEND BREACHES TO APP
+  // ----------------------------------------------------------
 
   useEffect(() => {
-    onZoneBreachesChange?.(breachPayload)
+    onZoneBreachesChange?.(
+      breachPayload
+    )
   }, [
     breachPayload,
     onZoneBreachesChange,
@@ -650,16 +887,27 @@ export default function FleetMap({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        <MapInitialView ships={ships} />
+        <MapInitialView
+          ships={ships}
+        />
 
         <RestrictedZoneDrawer
-          onZoneCreated={handleZoneCreated}
-          onZoneDeleted={handleZoneDeleted}
+          onZoneCreated={
+            handleZoneCreated
+          }
+          onZoneEdited={
+            handleZoneEdited
+          }
+          onZoneDeleted={
+            handleZoneDeleted
+          }
         />
 
         {restrictedZone && (
           <Polygon
-            positions={restrictedZone}
+            positions={
+              restrictedZone
+            }
             pathOptions={{
               color: '#ef4444',
               fillColor: '#ef4444',
@@ -669,27 +917,37 @@ export default function FleetMap({
           />
         )}
 
-        {ships.map((ship, index) => {
-          if (!ship.position) return null
+        {ships.map(
+          (ship, index) => {
+            if (
+              !ship?.position
+            ) {
+              return null
+            }
 
-          const key =
-            ship.id ||
-            ship.name ||
-            `ship-${index}`
+            const key =
+              ship.id ||
+              ship.name ||
+              `ship-${index}`
 
-          return (
-            <AnimatedShipMarker
-              key={key}
-              ship={ship}
-              breached={breachedIds.has(key)}
-            />
-          )
-        })}
+            return (
+              <AnimatedShipMarker
+                key={key}
+                ship={ship}
+                breached={breachedIds.has(
+                  key
+                )}
+              />
+            )
+          }
+        )}
       </MapContainer>
 
       {!zonePanelOpen ? (
         <button
-          onClick={() => setZonePanelOpen(true)}
+          onClick={() =>
+            setZonePanelOpen(true)
+          }
           title="Restricted Zone"
           style={{
             position: 'absolute',
@@ -699,12 +957,14 @@ export default function FleetMap({
             width: '42px',
             height: '42px',
             borderRadius: '9px',
-            border: '1px solid #ef4444',
+            border:
+              '1px solid #ef4444',
             background: '#111827',
             color: '#ef4444',
             fontSize: '20px',
             cursor: 'pointer',
-            boxShadow: '0 3px 12px rgba(0,0,0,.35)',
+            boxShadow:
+              '0 3px 12px rgba(0,0,0,.35)',
           }}
         >
           ⚠️
@@ -718,17 +978,21 @@ export default function FleetMap({
             zIndex: 1000,
             width: '180px',
             padding: '10px',
-            background: 'rgba(10,18,30,.94)',
-            border: '1px solid #374151',
+            background:
+              'rgba(10,18,30,.94)',
+            border:
+              '1px solid #374151',
             borderRadius: '8px',
             color: 'white',
-            boxShadow: '0 4px 15px rgba(0,0,0,.35)',
+            boxShadow:
+              '0 4px 15px rgba(0,0,0,.35)',
           }}
         >
           <div
             style={{
               display: 'flex',
-              justifyContent: 'space-between',
+              justifyContent:
+                'space-between',
               alignItems: 'center',
               marginBottom: '7px',
             }}
@@ -743,11 +1007,14 @@ export default function FleetMap({
             </span>
 
             <button
-              onClick={() => setZonePanelOpen(false)}
+              onClick={() =>
+                setZonePanelOpen(false)
+              }
               title="Minimize"
               style={{
                 border: 'none',
-                background: 'transparent',
+                background:
+                  'transparent',
                 color: '#9ca3af',
                 cursor: 'pointer',
                 fontSize: '17px',
@@ -761,39 +1028,50 @@ export default function FleetMap({
           <input
             value={zoneName}
             onChange={(e) =>
-              setZoneName(e.target.value)
+              setZoneName(
+                e.target.value
+              )
             }
             placeholder="Zone name"
             style={{
               width: '100%',
-              boxSizing: 'border-box',
+              boxSizing:
+                'border-box',
               padding: '6px',
               marginBottom: '6px',
               borderRadius: '4px',
-              border: '1px solid #4b5563',
-              background: '#111827',
+              border:
+                '1px solid #4b5563',
+              background:
+                '#111827',
               color: 'white',
               fontSize: '11px',
             }}
           />
 
           <button
-            onClick={handleSaveZone}
-            disabled={!restrictedZone}
+            onClick={
+              handleSaveZone
+            }
+            disabled={
+              !restrictedZone
+            }
             style={{
               width: '100%',
               padding: '6px',
               border: 'none',
               borderRadius: '4px',
-              background: restrictedZone
-                ? '#dc2626'
-                : '#374151',
+              background:
+                restrictedZone
+                  ? '#dc2626'
+                  : '#374151',
               color: 'white',
               fontSize: '10px',
               fontWeight: '700',
-              cursor: restrictedZone
-                ? 'pointer'
-                : 'not-allowed',
+              cursor:
+                restrictedZone
+                  ? 'pointer'
+                  : 'not-allowed',
             }}
           >
             SAVE ZONE
@@ -804,9 +1082,10 @@ export default function FleetMap({
               style={{
                 marginTop: '6px',
                 fontSize: '10px',
-                color: breachedShips.length
-                  ? '#fca5a5'
-                  : '#9ca3af',
+                color:
+                  breachedShips.length
+                    ? '#fca5a5'
+                    : '#9ca3af',
               }}
             >
               {breachedShips.length

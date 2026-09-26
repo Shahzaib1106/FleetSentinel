@@ -397,6 +397,120 @@ async def incident_action(
 
 
 # ============================================================
+# FLEET PLAYBACK / PROXIMITY / GEOFENCE
+# ============================================================
+
+@router.get("/playback")
+async def get_playback():
+    return {"count": len(simulator.history), "snapshots": list(simulator.history)}
+
+@router.get("/alerts")
+async def get_alerts():
+    return {"alerts": [*simulator.zone_alerts.values(), *simulator.proximity_alerts.values()]}
+
+
+# ============================================================
+# RESTRICTED ZONES
+# ============================================================
+
+class ZonePayload(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=120)
+    coordinates: list[list[float]] = Field(min_length=3)
+
+
+def _normalise_zone(payload: ZonePayload):
+    if any(len(point) != 2 for point in payload.coordinates):
+        raise HTTPException(status_code=400, detail="Each zone coordinate must be [lat, lng]")
+    return [(float(point[0]), float(point[1])) for point in payload.coordinates]
+
+@router.get("/zones")
+async def get_zones():
+    return {"zones": [{"id": zid, "name": zid, "coordinates": coords} for zid, coords in simulator.restricted_zones.items()]}
+
+@router.post("/zones")
+async def create_zone(payload: ZonePayload):
+    simulator.restricted_zones[payload.id] = _normalise_zone(payload)
+    for ship in simulator.fleet.ships:
+        simulator.recompute_route(ship, reason="restricted zone created")
+    if manager.active_connections:
+        await manager.broadcast(get_fleet_payload())
+    return {"success": True, "zone": {"id": payload.id, "name": payload.name, "coordinates": simulator.restricted_zones[payload.id]}}
+
+@router.put("/zones/{zone_id}")
+async def update_zone(zone_id: str, payload: ZonePayload):
+    if zone_id not in simulator.restricted_zones:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    simulator.restricted_zones.pop(zone_id)
+    simulator.restricted_zones[payload.id] = _normalise_zone(payload)
+    for ship in simulator.fleet.ships:
+        simulator.recompute_route(ship, reason="restricted zone updated")
+    if manager.active_connections:
+        await manager.broadcast(get_fleet_payload())
+    return {"success": True}
+
+@router.delete("/zones/{zone_id}")
+async def delete_zone(zone_id: str):
+    if zone_id not in simulator.restricted_zones:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    simulator.restricted_zones.pop(zone_id)
+    for ship in simulator.fleet.ships:
+        simulator.recompute_route(ship, reason="restricted zone deleted")
+    if manager.active_connections:
+        await manager.broadcast(get_fleet_payload())
+    return {"success": True}
+
+
+# ============================================================
+# CAPTAIN / DISTRESS NLP
+# ============================================================
+
+class DistressPayload(BaseModel):
+    ship_id: str = Field(min_length=1)
+    message: str = Field(min_length=3, max_length=2000)
+
+
+def parse_distress(message: str):
+    text = message.lower()
+    severity = "LOW"
+    if any(word in text for word in ["mayday", "sinking", "fire", "flood", "collision", "dead", "critical"]):
+        severity = "CRITICAL"
+    elif any(word in text for word in ["injur", "damage", "engine", "medical", "leak", "disabled"]):
+        severity = "HIGH"
+    injuries = 0
+    import re
+    match = re.search(r"(\d+)\s+(?:crew|people|persons|injur)", text)
+    if match:
+        injuries = int(match.group(1))
+    else:
+        number_words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+        word_match = re.search(r"(one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:crew|people|persons|injur)", text)
+        if word_match:
+            injuries = number_words[word_match.group(1)]
+    problem = "General distress"
+    for candidate in ["fire", "flooding", "engine failure", "collision", "medical emergency", "fuel leak", "loss of propulsion"]:
+        if candidate in text:
+            problem = candidate
+            break
+    return {"severity": severity, "problem": problem, "injuryCount": injuries, "impact": message.strip()}
+
+@router.post("/distress")
+async def submit_distress(payload: DistressPayload):
+    ship = find_ship(payload.ship_id)
+    if ship is None:
+        raise HTTPException(status_code=404, detail="Vessel not found")
+    analysis = parse_distress(payload.message)
+    ship.status = "distressed"
+    incident_id = f"distress-{ship.id}-{int(datetime.now().timestamp()*1000)}"
+    incident = create_or_update_incident(ship, incident_id, analysis["severity"], "AI DISTRESS")
+    incident["distressMessage"] = payload.message
+    incident["aiAnalysis"] = analysis
+    if manager.active_connections:
+        await manager.broadcast(get_fleet_payload())
+    return {"success": True, "incident": incident, "analysis": analysis}
+
+
+# ============================================================
 # EXECUTE DISPATCH COMMAND
 # ============================================================
 
@@ -458,6 +572,7 @@ async def execute_dispatch_command(
             ship.route = calculate_route(
                 ship.position,
                 ship.destination,
+                list(simulator.restricted_zones.values()),
             )
 
             ship.route_index = 0

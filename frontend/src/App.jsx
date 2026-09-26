@@ -9,23 +9,19 @@ import {
 import FleetPage from './FleetPage'
 import DispatchPage from './DispatchPage'
 import AnalyticsPage from './AnalyticsPage'
+import CaptainPage from './CaptainPage'
+import PlaybackPage from './PlaybackPage'
 import './App.css'
 import { useFleetSocket } from './hooks/useFleetSocket'
 import FleetMap from './FleetMap'
 import './AppShell.css'
 
+const API_BASE =
+  import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+
 /* ============================================================
    INCIDENT STORE
-   ============================================================
-
-   Live telemetry se incident create hone ke baad yahan store
-   hota hai.
-
-   Important:
-   - Store React render ke andar mutate nahi hota.
-   - Snapshot stable reference rakhta hai.
-   - Navigation se incidents disappear nahi hote.
-============================================================ */
+   ============================================================ */
 
 const incidentStore = {
   records: new Map(),
@@ -45,10 +41,7 @@ const incidentStore = {
   },
 
   addOrUpdateIncidents(incidents) {
-    if (
-      !Array.isArray(incidents) ||
-      incidents.length === 0
-    ) {
+    if (!Array.isArray(incidents) || incidents.length === 0) {
       return
     }
 
@@ -59,15 +52,10 @@ const incidentStore = {
         return
       }
 
-      const existing =
-        this.records.get(incident.id)
+      const existing = this.records.get(incident.id)
 
       if (!existing) {
-        this.records.set(
-          incident.id,
-          incident
-        )
-
+        this.records.set(incident.id, incident)
         changed = true
         return
       }
@@ -77,11 +65,7 @@ const incidentStore = {
         ...incident,
       }
 
-      this.records.set(
-        incident.id,
-        updated
-      )
-
+      this.records.set(incident.id, updated)
       changed = true
     })
 
@@ -89,70 +73,49 @@ const incidentStore = {
       return
     }
 
-    this.snapshot = Array.from(
-      this.records.values()
-    )
+    this.snapshot = Array.from(this.records.values())
 
-    this.listeners.forEach(
-      (listener) => {
-        listener()
-      }
-    )
+    this.listeners.forEach((listener) => {
+      listener()
+    })
   },
 }
 
 function useIncidentRecords() {
   return useSyncExternalStore(
-    incidentStore.subscribe.bind(
-      incidentStore
-    ),
-    incidentStore.getSnapshot.bind(
-      incidentStore
-    ),
-    incidentStore.getSnapshot.bind(
-      incidentStore
-    )
+    incidentStore.subscribe.bind(incidentStore),
+    incidentStore.getSnapshot.bind(incidentStore),
+    incidentStore.getSnapshot.bind(incidentStore)
   )
 }
 
 /* ============================================================
    APP
-============================================================ */
+   ============================================================ */
 
 function App() {
-  const [activePage, setActivePage] =
-    useState('Dashboard')
-
-  const [time, setTime] =
-    useState(new Date())
-
-  const [zoneBreaches, setZoneBreaches] =
-    useState([])
-
+  const [activePage, setActivePage] = useState('Dashboard')
+  const [time, setTime] = useState(new Date())
+  const [zoneBreaches, setZoneBreaches] = useState([])
   const [acknowledgedIncidents, setAcknowledgedIncidents] =
     useState(() => new Set())
-
   const [dismissedIncidents, setDismissedIncidents] =
     useState(() => new Set())
-
-  const [incidentHistory, setIncidentHistory] =
-    useState([])
-
-  const [backendIncidents, setBackendIncidents] =
-    useState([])
-
-  const [dispatchVesselId, setDispatchVesselId] =
-    useState('')
+  const [incidentHistory, setIncidentHistory] = useState([])
+  const [backendIncidents, setBackendIncidents] = useState([])
+  const [dispatchVesselId, setDispatchVesselId] = useState('')
 
   const {
     ships,
     connected,
     lastUpdate,
+    zones,
+    
   } = useFleetSocket()
 
   /* ============================================================
      CLOCK
-  ============================================================ */
+     ============================================================ */
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -166,20 +129,75 @@ function App() {
 
   /* ============================================================
      ZONE BREACH CALLBACK
-  ============================================================ */
+     ============================================================ */
 
-  const handleZoneBreachesChange =
-    useCallback((breaches) => {
-      setZoneBreaches(
-        Array.isArray(breaches)
-          ? breaches
-          : []
+  const handleZoneBreachesChange = useCallback((breaches) => {
+    setZoneBreaches(
+      Array.isArray(breaches)
+        ? breaches
+        : []
+    )
+  }, [])
+
+  /* ============================================================
+     ZONE BREACH ALERT SOUND
+     ============================================================ */
+
+  useEffect(() => {
+    if (!zoneBreaches.length) {
+      return
+    }
+
+    try {
+      const AudioContextClass =
+        window.AudioContext ||
+        window.webkitAudioContext
+
+      if (!AudioContextClass) {
+        return
+      }
+
+      const context = new AudioContextClass()
+      const oscillator = context.createOscillator()
+      const gain = context.createGain()
+
+      oscillator.frequency.value = 880
+      oscillator.type = 'square'
+
+      gain.gain.setValueAtTime(
+        0.0001,
+        context.currentTime
       )
-    }, [])
+
+      gain.gain.exponentialRampToValueAtTime(
+        0.06,
+        context.currentTime + 0.02
+      )
+
+      gain.gain.exponentialRampToValueAtTime(
+        0.0001,
+        context.currentTime + 0.22
+      )
+
+      oscillator.connect(gain)
+      gain.connect(context.destination)
+
+      oscillator.start()
+      oscillator.stop(
+        context.currentTime + 0.25
+      )
+
+      setTimeout(() => {
+        context.close?.()
+      }, 350)
+    } catch {
+      // Browser autoplay policies may block alert audio.
+    }
+  }, [zoneBreaches.length])
 
   /* ============================================================
      CRISIS STATUS
-  ============================================================ */
+     ============================================================ */
 
   const isCrisisStatus = useCallback(
     (status) => {
@@ -197,7 +215,7 @@ function App() {
 
   /* ============================================================
      LIVE STATUS ALERTS
-  ============================================================ */
+     ============================================================ */
 
   const statusAlertShips = useMemo(() => {
     return ships.filter((ship) =>
@@ -207,7 +225,7 @@ function App() {
 
   /* ============================================================
      STATUS ALERT IDS
-  ============================================================ */
+     ============================================================ */
 
   const statusAlertIds = useMemo(() => {
     return new Set(
@@ -222,23 +240,42 @@ function App() {
 
   /* ============================================================
      ZONE-ONLY BREACHES
-  ============================================================ */
+     ============================================================ */
 
   const zoneOnlyBreaches = useMemo(() => {
-    return zoneBreaches.filter(
-      (breach) =>
-        !statusAlertIds.has(
-          breach.shipId
-        )
-    )
-  }, [
-    zoneBreaches,
-    statusAlertIds,
-  ])
+    const seen = new Set()
+
+    return zoneBreaches.filter((breach) => {
+      if (!breach?.shipId) {
+        return false
+      }
+
+      /*
+       * Agar ship already ek status incident mein hai,
+       * separate zone incident create nahi karna.
+       */
+      if (statusAlertIds.has(breach.shipId)) {
+        return false
+      }
+
+      /*
+       * Same ship + same zone ko duplicate hone se roko.
+       */
+      const key = `${breach.shipId}-${breach.zoneName || 'zone'}`
+
+      if (seen.has(key)) {
+        return false
+      }
+
+      seen.add(key)
+
+      return true
+    })
+  }, [zoneBreaches, statusAlertIds])
 
   /* ============================================================
      BREACH LOOKUP
-  ============================================================ */
+     ============================================================ */
 
   const breachByShipId = useMemo(() => {
     return new Map(
@@ -251,14 +288,14 @@ function App() {
 
   /* ============================================================
      CURRENT LIVE INCIDENTS
-  ============================================================ */
+     ============================================================ */
 
   const allIncidents = useMemo(() => {
     const incidents = []
 
     /* ----------------------------------------------------------
        STATUS INCIDENTS
-    ---------------------------------------------------------- */
+       ---------------------------------------------------------- */
 
     statusAlertShips.forEach((ship) => {
       const shipId =
@@ -271,35 +308,25 @@ function App() {
 
       incidents.push({
         id: `status-${shipId}`,
-
         type: 'STATUS ALERT',
-
         vessel:
           ship.name ||
           'Unknown Vessel',
-
         vesselId:
           ship.id ||
           'N/A',
-
         status:
           ship.status,
-
         destination:
           ship.destination,
-
         cargo:
           ship.cargo,
-
         speed:
           ship.speed_knots,
-
         fuel:
           ship.fuel_tons,
-
         position:
           ship.position,
-
         zoneBreach:
           zoneBreach || null,
       })
@@ -307,36 +334,28 @@ function App() {
 
     /* ----------------------------------------------------------
        ZONE BREACH INCIDENTS
-    ---------------------------------------------------------- */
+       ---------------------------------------------------------- */
 
-    zoneOnlyBreaches.forEach(
-      (breach) => {
-        incidents.push({
-          id: `zone-${breach.shipId}-${breach.zoneName}`,
-
-          type: 'ZONE BREACH',
-
-          vessel:
-            breach.shipName ||
-            'Unknown Vessel',
-
-          vesselId:
-            breach.shipId ||
-            'N/A',
-
-          status: 'active',
-
-          position:
-            breach.position,
-
-          zoneName:
-            breach.zoneName,
-
-          zoneBreach:
-            breach,
-        })
-      }
-    )
+    zoneOnlyBreaches.forEach((breach) => {
+      incidents.push({
+        id: `zone-${breach.shipId}-${breach.zoneName || 'zone'}`,
+        type: 'ZONE BREACH',
+        vessel:
+          breach.shipName ||
+          'Unknown Vessel',
+        vesselId:
+          breach.shipId ||
+          'N/A',
+        status: 'active',
+        position:
+          breach.position,
+        zoneName:
+          breach.zoneName ||
+          'Restricted Zone',
+        zoneBreach:
+          breach,
+      })
+    })
 
     return incidents
   }, [
@@ -347,7 +366,7 @@ function App() {
 
   /* ============================================================
      STORE LIVE INCIDENTS
-  ============================================================ */
+     ============================================================ */
 
   useEffect(() => {
     incidentStore.addOrUpdateIncidents(
@@ -357,20 +376,20 @@ function App() {
 
   /* ============================================================
      PERSISTENT INCIDENT RECORDS
-  ============================================================ */
+     ============================================================ */
 
   const incidentRecords =
     useIncidentRecords()
 
   /* ============================================================
      BACKEND INCIDENT SYNC
-  ============================================================ */
+     ============================================================ */
 
   const refreshBackendIncidents = useCallback(
     async () => {
       try {
         const response = await fetch(
-          'http://127.0.0.1:8000/api/dispatch/incidents'
+          `${API_BASE}/api/dispatch/incidents`
         )
 
         if (!response.ok) {
@@ -380,6 +399,7 @@ function App() {
         }
 
         const data = await response.json()
+
         setBackendIncidents(
           Array.isArray(data)
             ? data
@@ -416,7 +436,12 @@ function App() {
 
   /* ============================================================
      ACTIVE INCIDENTS
-  ============================================================ */
+     
+     Important:
+     Backend GEOFENCE_BREACH aur frontend
+     ZONE BREACH same incident ko duplicate
+     nahi karenge.
+     ============================================================ */
 
   const activeIncidents = useMemo(() => {
     const liveMap = new Map(
@@ -427,58 +452,145 @@ function App() {
     )
 
     backendIncidents.forEach((incident) => {
-      const existing = liveMap.get(incident.id)
+      if (!incident?.id) {
+        return
+      }
+
+      const incidentType = String(
+        incident.type || ''
+      ).toUpperCase()
+
+      /*
+       * Backend geofence ko existing frontend
+       * zone breach ke saath merge karo.
+       */
+      if (
+        incidentType === 'GEOFENCE_BREACH' &&
+        incident.vesselId
+      ) {
+        const matchingZoneIncident =
+          Array.from(liveMap.values()).find(
+            (existing) =>
+              existing.vesselId ===
+                incident.vesselId &&
+              existing.type === 'ZONE BREACH'
+          )
+
+        if (matchingZoneIncident) {
+          liveMap.set(
+            matchingZoneIncident.id,
+            {
+              ...matchingZoneIncident,
+              ...incident,
+
+              /*
+               * Frontend ID preserve karo taake
+               * duplicate incident create na ho.
+               */
+              id: matchingZoneIncident.id,
+
+              type: 'ZONE BREACH',
+
+              vessel:
+                incident.vessel ||
+                matchingZoneIncident.vessel,
+
+              vesselId:
+                incident.vesselId,
+
+              zoneName:
+                matchingZoneIncident.zoneName ||
+                incident.zoneId ||
+                'Restricted Zone',
+
+              position:
+                incident.position ||
+                matchingZoneIncident.position,
+
+              zoneBreach:
+                matchingZoneIncident.zoneBreach ||
+                incident,
+            }
+          )
+
+          return
+        }
+      }
+
+      /*
+       * Normal backend incident.
+       */
+      const existing =
+        liveMap.get(incident.id)
 
       liveMap.set(
         incident.id,
         existing
-          ? { ...existing, ...incident }
+          ? {
+              ...existing,
+              ...incident,
+            }
           : incident
       )
     })
 
-    return Array.from(liveMap.values()).filter(
-      (incident) => {
-        const state = String(
-          incident.responseState ||
+    return Array.from(
+      liveMap.values()
+    ).filter((incident) => {
+      const state = String(
+        incident.responseState ||
           incident.status ||
           ''
-        ).toUpperCase()
+      ).toUpperCase()
 
-        return (
-          !dismissedIncidents.has(incident.id) &&
-          state !== 'RESOLVED' &&
-          state !== 'DISMISSED'
-        )
-      }
-    )
+      return (
+        !dismissedIncidents.has(
+          incident.id
+        ) &&
+        state !== 'RESOLVED' &&
+        state !== 'DISMISSED'
+      )
+    })
   }, [
     incidentRecords,
     backendIncidents,
     dismissedIncidents,
   ])
 
+  /* ============================================================
+     ACTIVE INCIDENT COUNT
+     
+     IMPORTANT:
+     alerts.length ko dobara add nahi karna.
+     alerts mein backend geofence/proximity alerts
+     already included ho sakte hain.
+     ============================================================ */
+
   const totalCrisisCount =
     activeIncidents.length
 
   /* ============================================================
      ACKNOWLEDGE INCIDENT
-  ============================================================ */
+     ============================================================ */
 
   const acknowledgeIncident = useCallback(
     async (incident) => {
       try {
         await fetch(
-          'http://127.0.0.1:8000/api/dispatch/incident/action',
+          `${API_BASE}/api/dispatch/incident/action`,
           {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json',
+              'Content-Type':
+                'application/json',
             },
             body: JSON.stringify({
-              incident_id: incident.id,
-              action: 'ACKNOWLEDGE',
-              operator: 'COMMAND OPERATOR',
+              incident_id:
+                incident.id,
+              action:
+                'ACKNOWLEDGE',
+              operator:
+                'COMMAND OPERATOR',
             }),
           }
         )
@@ -491,8 +603,13 @@ function App() {
 
       setAcknowledgedIncidents(
         (previous) => {
-          const next = new Set(previous)
-          next.add(incident.id)
+          const next =
+            new Set(previous)
+
+          next.add(
+            incident.id
+          )
+
           return next
         }
       )
@@ -501,8 +618,10 @@ function App() {
         (previous) => [
           {
             ...incident,
-            action: 'ACKNOWLEDGED',
-            timestamp: new Date(),
+            action:
+              'ACKNOWLEDGED',
+            timestamp:
+              new Date(),
           },
           ...previous,
         ]
@@ -515,22 +634,26 @@ function App() {
 
   /* ============================================================
      DISMISS INCIDENT
-  ============================================================ */
+     ============================================================ */
 
   const dismissIncident = useCallback(
     async (incident) => {
       try {
         await fetch(
-          'http://127.0.0.1:8000/api/dispatch/incident/action',
+          `${API_BASE}/api/dispatch/incident/action`,
           {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json',
+              'Content-Type':
+                'application/json',
             },
             body: JSON.stringify({
-              incident_id: incident.id,
-              action: 'DISMISS',
-              operator: 'COMMAND OPERATOR',
+              incident_id:
+                incident.id,
+              action:
+                'DISMISS',
+              operator:
+                'COMMAND OPERATOR',
             }),
           }
         )
@@ -543,8 +666,13 @@ function App() {
 
       setDismissedIncidents(
         (previous) => {
-          const next = new Set(previous)
-          next.add(incident.id)
+          const next =
+            new Set(previous)
+
+          next.add(
+            incident.id
+          )
+
           return next
         }
       )
@@ -553,8 +681,10 @@ function App() {
         (previous) => [
           {
             ...incident,
-            action: 'DISMISSED',
-            timestamp: new Date(),
+            action:
+              'DISMISSED',
+            timestamp:
+              new Date(),
           },
           ...previous,
         ]
@@ -565,26 +695,38 @@ function App() {
     [refreshBackendIncidents]
   )
 
-  const dispatchIncident = useCallback(
-    (incident) => {
-      setDispatchVesselId(
-        incident.vesselId || ''
-      )
-      setActivePage('Dispatch')
-    },
-    []
-  )
+  /* ============================================================
+     DISPATCH INCIDENT
+     ============================================================ */
+
+  const dispatchIncident =
+    useCallback(
+      (incident) => {
+        setDispatchVesselId(
+          incident.vesselId ||
+            ''
+        )
+
+        setActivePage(
+          'Dispatch'
+        )
+      },
+      []
+    )
 
   /* ============================================================
      DISPLAY DATA
-  ============================================================ */
+     ============================================================ */
 
   const formattedTime =
-    time.toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
+    time.toLocaleTimeString(
+      [],
+      {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }
+    )
 
   const lastUpdateText =
     lastUpdate
@@ -604,34 +746,46 @@ function App() {
   const normalShips =
     ships.filter(
       (ship) =>
-        ship.status === 'normal'
+        ship.status ===
+        'normal'
     ).length
 
   const dashboardIncidents =
-    activeIncidents.slice(0, 3)
+    activeIncidents.slice(
+      0,
+      3
+    )
 
   /* ============================================================
      RENDER
-  ============================================================ */
+     ============================================================ */
 
   return (
     <div className="app-shell">
 
-      {/* ================================================== */}
-      {/* SIDEBAR */}
-      {/* ================================================== */}
+      {/* ==================================================
+          SIDEBAR
+          ================================================== */}
 
       <aside className="sidebar">
 
         <div className="logo-area">
 
-          <div className="brand-logo" aria-label="Fleet Sentinel">
+          <div
+            className="brand-logo"
+            aria-label="Fleet Sentinel"
+          >
             <span>FS</span>
           </div>
 
           <div className="brand-copy">
-            <h2>FLEET SENTINEL</h2>
-            <p>MARITIME CRISIS COMMAND</p>
+            <h2>
+              FLEET SENTINEL
+            </h2>
+
+            <p>
+              MARITIME CRISIS COMMAND
+            </p>
           </div>
 
         </div>
@@ -648,6 +802,8 @@ function App() {
             ['⚠', 'Crisis Center'],
             ['➤', 'Dispatch'],
             ['◈', 'Analytics'],
+            ['⚓', 'Captain'],
+            ['◷', 'Playback'],
           ].map(
             ([icon, name]) => (
               <button
@@ -663,7 +819,6 @@ function App() {
                   )
                 }
               >
-
                 <span className="nav-icon">
                   {icon}
                 </span>
@@ -678,7 +833,6 @@ function App() {
                     {totalCrisisCount}
                   </span>
                 )}
-
               </button>
             )
           )}
@@ -695,10 +849,9 @@ function App() {
                   ? ''
                   : 'offline'
               }`}
-            ></div>
+            />
 
             <div>
-
               <strong>
                 {connected
                   ? 'SYSTEM ONLINE'
@@ -710,7 +863,6 @@ function App() {
                   ? 'Fleet telemetry operational'
                   : 'Waiting for backend'}
               </span>
-
             </div>
 
           </div>
@@ -722,7 +874,6 @@ function App() {
             </div>
 
             <div>
-
               <strong>
                 COMMAND OPERATOR
               </strong>
@@ -730,7 +881,6 @@ function App() {
               <span>
                 Administrator
               </span>
-
             </div>
 
             <span className="more">
@@ -743,15 +893,15 @@ function App() {
 
       </aside>
 
-      {/* ================================================== */}
-      {/* MAIN */}
-      {/* ================================================== */}
+      {/* ==================================================
+          MAIN
+          ================================================== */}
 
       <main className="main-area">
 
-        {/* ================================================== */}
-        {/* TOPBAR */}
-        {/* ================================================== */}
+        {/* ==================================================
+            TOPBAR
+            ================================================== */}
 
         <header className="topbar">
 
@@ -779,7 +929,7 @@ function App() {
                     ? 'online'
                     : 'offline'
                 }`}
-              ></span>
+              />
 
               {connected
                 ? 'FLEET LIVE'
@@ -811,9 +961,9 @@ function App() {
 
         </header>
 
-        {/* ================================================== */}
-        {/* CRISIS CENTER */}
-        {/* ================================================== */}
+        {/* ==================================================
+            CRISIS CENTER
+            ================================================== */}
 
         {activePage ===
         'Crisis Center' ? (
@@ -825,7 +975,7 @@ function App() {
               <div>
 
                 <div className="section-tag">
-                  <span></span>
+                  <span />
                   INCIDENT RESPONSE
                 </div>
 
@@ -849,11 +999,13 @@ function App() {
               <div className="hero-status">
 
                 <div className="radar">
-                  <div className="radar-ring ring-one"></div>
-                  <div className="radar-ring ring-two"></div>
-                  <div className="radar-ring ring-three"></div>
-                  <div className="radar-center"></div>
-                  <div className="radar-line"></div>
+
+                  <div className="radar-ring ring-one" />
+                  <div className="radar-ring ring-two" />
+                  <div className="radar-ring ring-three" />
+                  <div className="radar-center" />
+                  <div className="radar-line" />
+
                 </div>
 
                 <div>
@@ -877,9 +1029,9 @@ function App() {
 
             </section>
 
-            {/* ================================================== */}
-            {/* CRISIS STATS */}
-            {/* ================================================== */}
+            {/* ==================================================
+                CRISIS STATS
+                ================================================== */}
 
             <section className="stats">
 
@@ -907,11 +1059,9 @@ function App() {
                 </strong>
 
                 <div className="stat-footer danger-text">
-
                   <span>
                     ● LIVE
                   </span>
-
                 </div>
 
               </div>
@@ -935,11 +1085,9 @@ function App() {
                 </strong>
 
                 <div className="stat-footer danger-text">
-
                   <span>
                     ● MONITORING
                   </span>
-
                 </div>
 
               </div>
@@ -965,11 +1113,9 @@ function App() {
                 </strong>
 
                 <div className="stat-footer positive">
-
                   <span>
                     ● REVIEWED
                   </span>
-
                 </div>
 
               </div>
@@ -993,20 +1139,18 @@ function App() {
                 </strong>
 
                 <div className="stat-footer positive">
-
                   <span>
                     ● LOGGED
                   </span>
-
                 </div>
 
               </div>
 
             </section>
 
-            {/* ================================================== */}
-            {/* INCIDENT GRID */}
-            {/* ================================================== */}
+            {/* ==================================================
+                INCIDENT GRID
+                ================================================== */}
 
             <section
               className="bottom-grid"
@@ -1016,7 +1160,9 @@ function App() {
               }}
             >
 
-              {/* ACTIVE INCIDENTS */}
+              {/* ==================================================
+                  ACTIVE INCIDENTS
+                  ================================================== */}
 
               <div className="panel fleet-panel">
 
@@ -1042,6 +1188,7 @@ function App() {
                         2,
                         '0'
                       )}{' '}
+
                     ACTIVE
 
                   </span>
@@ -1060,6 +1207,7 @@ function App() {
 
                   {activeIncidents.length ===
                     0 && (
+
                     <div className="crisis-item normal">
 
                       <div className="crisis-indicator">
@@ -1088,6 +1236,7 @@ function App() {
                       </div>
 
                     </div>
+
                   )}
 
                   {activeIncidents.map(
@@ -1103,6 +1252,7 @@ function App() {
                         'ZONE BREACH'
 
                       return (
+
                         <div
                           className={`crisis-item ${
                             isZone
@@ -1141,24 +1291,30 @@ function App() {
                               </strong>
 
                               <span>
+
                                 {isZone
                                   ? 'ZONE BREACH'
                                   : String(
                                       incident.status
                                     ).toUpperCase()}
+
                               </span>
 
                               {incident.responseState && (
+
                                 <span
                                   style={{
-                                    marginLeft: '6px',
-                                    color: '#38bdf8',
+                                    marginLeft:
+                                      '6px',
+                                    color:
+                                      '#38bdf8',
                                   }}
                                 >
                                   {String(
                                     incident.responseState
                                   ).toUpperCase()}
                                 </span>
+
                               )}
 
                             </div>
@@ -1171,16 +1327,20 @@ function App() {
                             </p>
 
                             {isZone && (
+
                               <p>
                                 ⚠ Restricted
                                 Zone:{' '}
                                 {
-                                  incident.zoneName
+                                  incident.zoneName ||
+                                  'Restricted Zone'
                                 }
                               </p>
+
                             )}
 
                             {!isZone && (
+
                               <p>
                                 ◉ Destination:{' '}
                                 {
@@ -1188,9 +1348,11 @@ function App() {
                                   'N/A'
                                 }
                               </p>
+
                             )}
 
                             {incident.position && (
+
                               <small>
                                 📍{' '}
                                 {Number(
@@ -1205,9 +1367,11 @@ function App() {
                                     .lng
                                 ).toFixed(5)}
                               </small>
+
                             )}
 
                             {acknowledged && (
+
                               <small
                                 style={{
                                   display:
@@ -1222,6 +1386,7 @@ function App() {
                               >
                                 ✓ ACKNOWLEDGED
                               </small>
+
                             )}
 
                             <div
@@ -1235,6 +1400,7 @@ function App() {
                             >
 
                               {!acknowledged && (
+
                                 <button
                                   onClick={() =>
                                     acknowledgeIncident(
@@ -1262,6 +1428,7 @@ function App() {
                                 >
                                   ACKNOWLEDGE
                                 </button>
+
                               )}
 
                               <button
@@ -1309,9 +1476,12 @@ function App() {
                                     '4px',
                                   padding:
                                     '5px 8px',
-                                  fontSize: '9px',
-                                  fontWeight: '700',
-                                  cursor: 'pointer',
+                                  fontSize:
+                                    '9px',
+                                  fontWeight:
+                                    '700',
+                                  cursor:
+                                    'pointer',
                                 }}
                               >
                                 DISPATCH VESSEL →
@@ -1322,6 +1492,7 @@ function App() {
                           </div>
 
                         </div>
+
                       )
                     }
                   )}
@@ -1330,7 +1501,9 @@ function App() {
 
               </div>
 
-              {/* INCIDENT HISTORY */}
+              {/* ==================================================
+                  INCIDENT HISTORY
+                  ================================================== */}
 
               <div className="panel response-panel">
 
@@ -1362,6 +1535,7 @@ function App() {
 
                   {incidentHistory.length ===
                   0 ? (
+
                     <div
                       style={{
                         padding:
@@ -1378,12 +1552,15 @@ function App() {
                       actions
                       recorded yet.
                     </div>
+
                   ) : (
+
                     incidentHistory.map(
                       (
                         item,
                         index
                       ) => (
+
                         <div
                           key={`${item.id}-${index}`}
                           style={{
@@ -1452,8 +1629,10 @@ function App() {
                           </small>
 
                         </div>
+
                       )
                     )
+
                   )}
 
                 </div>
@@ -1467,53 +1646,85 @@ function App() {
         ) : activePage === 'Dispatch' ? (
 
           <div className="dashboard-content dispatch-route-content">
+
             <DispatchPage
               ships={ships}
-              selectedVesselId={dispatchVesselId}
+              selectedVesselId={
+                dispatchVesselId
+              }
               onSelectedVesselHandled={() =>
                 setDispatchVesselId('')
               }
             />
+
           </div>
+
+        ) : activePage === 'Captain' ? (
+
+          <CaptainPage
+            ships={ships}
+          />
+
+        ) : activePage === 'Playback' ? (
+
+          <PlaybackPage
+            ships={ships}
+          />
 
         ) : activePage === 'Analytics' ? (
 
           <div className="dashboard-content">
+
             <AnalyticsPage
               ships={ships}
-              incidents={activeIncidents}
-              incidentHistory={incidentHistory}
+              incidents={
+                activeIncidents
+              }
+              incidentHistory={
+                incidentHistory
+              }
             />
+
           </div>
 
         ) : activePage === 'Fleet' ? (
 
           <div className="dashboard-content">
-            <FleetPage ships={ships} />
+
+            <FleetPage
+              ships={ships}
+            />
+
           </div>
 
         ) : (
 
-          /* ================================================== */
-          /* DASHBOARD */
-          /* ================================================== */
+          /* ==================================================
+             DASHBOARD
+             ================================================== */
 
           <div className="dashboard-content">
 
-            {/* HERO */}
+            {/* ==================================================
+                HERO
+                ================================================== */}
 
             <section className="hero">
 
               <div>
 
                 <div className="section-tag">
-                  <span></span>
+
+                  <span />
+
                   COMMAND OVERVIEW
+
                 </div>
 
                 <h2>
                   Fleet situation
                   <br />
+
                   <span>
                     at a glance.
                   </span>
@@ -1534,11 +1745,13 @@ function App() {
               <div className="hero-status">
 
                 <div className="radar">
-                  <div className="radar-ring ring-one"></div>
-                  <div className="radar-ring ring-two"></div>
-                  <div className="radar-ring ring-three"></div>
-                  <div className="radar-center"></div>
-                  <div className="radar-line"></div>
+
+                  <div className="radar-ring ring-one" />
+                  <div className="radar-ring ring-two" />
+                  <div className="radar-ring ring-three" />
+                  <div className="radar-center" />
+                  <div className="radar-line" />
+
                 </div>
 
                 <div>
@@ -1564,7 +1777,9 @@ function App() {
 
             </section>
 
-            {/* STATS */}
+            {/* ==================================================
+                STATS
+                ================================================== */}
 
             <section className="stats">
 
@@ -1630,8 +1845,7 @@ function App() {
                   </span>
 
                   <small>
-                    real-time
-                    tracking
+                    real-time tracking
                   </small>
 
                 </div>
@@ -1692,11 +1906,11 @@ function App() {
                 <div className="availability">
 
                   <div>
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                    <span></span>
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                    <span />
                   </div>
 
                   <small>
@@ -1709,11 +1923,15 @@ function App() {
 
             </section>
 
-            {/* MAIN GRID */}
+            {/* ==================================================
+                MAIN GRID
+                ================================================== */}
 
             <section className="main-grid">
 
-              {/* MAP */}
+              {/* ==================================================
+                  MAP
+                  ================================================== */}
 
               <div className="panel map-panel">
 
@@ -1749,6 +1967,7 @@ function App() {
 
                   <FleetMap
                     ships={ships}
+                    zones={zones}
                     onZoneBreachesChange={
                       handleZoneBreachesChange
                     }
@@ -1758,7 +1977,9 @@ function App() {
 
               </div>
 
-              {/* FLEET ALERTS */}
+              {/* ==================================================
+                  FLEET ALERTS
+                  ================================================== */}
 
               <div className="panel crisis-panel">
 
@@ -1784,6 +2005,7 @@ function App() {
                         2,
                         '0'
                       )}{' '}
+
                     ACTIVE
 
                   </span>
@@ -1794,6 +2016,7 @@ function App() {
 
                   {dashboardIncidents.map(
                     (incident) => (
+
                       <div
                         className={`crisis-item ${
                           incident.type ===
@@ -1821,12 +2044,14 @@ function App() {
                             </strong>
 
                             <span>
+
                               {incident.type ===
                               'ZONE BREACH'
                                 ? 'ZONE BREACH'
                                 : String(
                                     incident.status
                                   ).toUpperCase()}
+
                             </span>
 
                           </div>
@@ -1839,13 +2064,18 @@ function App() {
                           </p>
 
                           <small>
+
                             {incident.type ===
                             'ZONE BREACH'
-                              ? `Restricted Zone: ${incident.zoneName}`
+                              ? `Restricted Zone: ${
+                                  incident.zoneName ||
+                                  'Restricted Zone'
+                                }`
                               : `Destination: ${
                                   incident.destination ||
                                   'N/A'
                                 }`}
+
                           </small>
 
                         </div>
@@ -1862,11 +2092,13 @@ function App() {
                         </button>
 
                       </div>
+
                     )
                   )}
 
                   {totalCrisisCount ===
                     0 && (
+
                     <div className="crisis-item normal">
 
                       <div className="crisis-indicator">
@@ -1902,6 +2134,7 @@ function App() {
                       </div>
 
                     </div>
+
                   )}
 
                 </div>
@@ -1915,6 +2148,7 @@ function App() {
                   }
                 >
                   VIEW ALL ALERTS
+
                   <span>
                     →
                   </span>
@@ -1924,11 +2158,15 @@ function App() {
 
             </section>
 
-            {/* BOTTOM GRID */}
+            {/* ==================================================
+                BOTTOM GRID
+                ================================================== */}
 
             <section className="bottom-grid">
 
-              {/* FLEET STATUS */}
+              {/* ==================================================
+                  FLEET STATUS
+                  ================================================== */}
 
               <div className="panel fleet-panel">
 
@@ -1989,6 +2227,7 @@ function App() {
                     .slice(0, 6)
                     .map(
                       (ship) => (
+
                         <div
                           className="fleet-row"
                           key={
@@ -2015,7 +2254,7 @@ function App() {
                             className={`unit-status ${ship.status}`}
                           >
 
-                            <i></i>
+                            <i />
 
                             {ship.status.toUpperCase()}
 
@@ -2033,7 +2272,7 @@ function App() {
                                     100
                                   )}%`,
                                 }}
-                              ></span>
+                              />
 
                             </div>
 
@@ -2045,11 +2284,13 @@ function App() {
                           </div>
 
                         </div>
+
                       )
                     )}
 
                   {ships.length ===
                     0 && (
+
                     <div className="fleet-row">
 
                       <span>
@@ -2059,13 +2300,16 @@ function App() {
                       </span>
 
                     </div>
+
                   )}
 
                 </div>
 
               </div>
 
-              {/* FLEET COMMAND */}
+              {/* ==================================================
+                  FLEET COMMAND
+                  ================================================== */}
 
               <div className="panel response-panel">
 
@@ -2093,7 +2337,9 @@ function App() {
 
                   {ships.length >
                   0 ? (
+
                     <>
+
                       <div className="dispatch-node">
 
                         <div className="node-icon">
@@ -2169,8 +2415,11 @@ function App() {
                         </div>
 
                       </div>
+
                     </>
+
                   ) : (
+
                     <div className="dispatch-node">
 
                       <div>
@@ -2187,6 +2436,7 @@ function App() {
                       </div>
 
                     </div>
+
                   )}
 
                 </div>
@@ -2200,9 +2450,11 @@ function App() {
                   }
                 >
                   OPEN FLEET CONTROL
+
                   <span>
                     →
                   </span>
+
                 </button>
 
               </div>
@@ -2210,9 +2462,11 @@ function App() {
             </section>
 
           </div>
+
         )}
 
       </main>
+
     </div>
   )
 }
