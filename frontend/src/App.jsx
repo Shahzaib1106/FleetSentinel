@@ -7,8 +7,7 @@ import {
 } from 'react'
 
 import FleetPage from './FleetPage'
-import DispatchPage from './DispatchPage'
-import './DispatchPage.css'
+import AnalyticsPage from './AnalyticsPage'
 import './App.css'
 import { useFleetSocket } from './hooks/useFleetSocket'
 import FleetMap from './FleetMap'
@@ -74,25 +73,6 @@ const incidentStore = {
       const updated = {
         ...existing,
         ...incident,
-      }
-
-      const same =
-        existing.type === updated.type &&
-        existing.vessel === updated.vessel &&
-        existing.vesselId === updated.vesselId &&
-        existing.status === updated.status &&
-        existing.destination === updated.destination &&
-        existing.cargo === updated.cargo &&
-        existing.speed === updated.speed &&
-        existing.fuel === updated.fuel &&
-        existing.zoneName === updated.zoneName &&
-        JSON.stringify(existing.position) ===
-          JSON.stringify(updated.position) &&
-        JSON.stringify(existing.zoneBreach) ===
-          JSON.stringify(updated.zoneBreach)
-
-      if (same) {
-        return
       }
 
       this.records.set(
@@ -724,19 +704,8 @@ function App() {
         {/* CRISIS CENTER */}
         {/* ================================================== */}
 
-        {activePage === 'Fleet' ? (
-
-          <div className="dashboard-content">
-            <FleetPage ships={ships} />
-          </div>
-
-        ) : activePage === 'Dispatch' ? (
-
-          <div className="dashboard-content">
-            <DispatchPage ships={ships} />
-          </div>
-
-        ) : activePage === 'Crisis Center' ? (
+        {activePage ===
+        'Crisis Center' ? (
 
           <div className="dashboard-content">
 
@@ -1344,6 +1313,22 @@ function App() {
 
             </section>
 
+          </div>
+
+        ) : activePage === 'Analytics' ? (
+
+          <div className="dashboard-content">
+            <AnalyticsPage
+              ships={ships}
+              incidents={activeIncidents}
+              incidentHistory={incidentHistory}
+            />
+          </div>
+
+        ) : activePage === 'Fleet' ? (
+
+          <div className="dashboard-content">
+            <FleetPage ships={ships} />
           </div>
 
         ) : (
