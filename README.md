@@ -1,68 +1,695 @@
-# FleetSentinel — Maritime Crisis Command
+# 🚢 FleetSentinel — Fleet Crisis Command
 
-Real-time crisis operations dashboard for the Code Rush Web Dev Track scenario.
+> A real-time maritime fleet monitoring and crisis-response platform for tracking commercial cargo ships, detecting operational risks, and coordinating incident response.
 
-## Stack
-- React + Vite
-- React Leaflet + Leaflet Draw
-- FastAPI + Python 3.11
-- WebSocket real-time fleet telemetry
-- Open-Meteo weather integration
-- Docker Compose
+[![Live Demo](https://img.shields.io/badge/Live-Demo-success?style=for-the-badge)](https://fleetsentinel-production-cd66.up.railway.app/)
+[![Backend](https://img.shields.io/badge/Backend-Railway-blue?style=for-the-badge)](https://fleetsentinel-production.up.railway.app/)
+[![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB?style=for-the-badge)](https://react.dev/)
+[![Backend Tech](https://img.shields.io/badge/API-FastAPI-009688?style=for-the-badge)](https://fastapi.tiangolo.com/)
+[![Docker](https://img.shields.io/badge/Container-Docker-2496ED?style=for-the-badge)](https://www.docker.com/)
+[![Deployment](https://img.shields.io/badge/Deployment-Railway-purple?style=for-the-badge)](https://railway.app/)
 
-## Implemented core
-- Exactly 15 provided cargo ships
-- 1 Hz backend simulation and WebSocket broadcast
-- Smooth frontend interpolation
-- Command dispatch: reroute, speed, heading, hold
-- Runtime restricted zones with edit/delete and backend persistence
-- Navigable-water constrained route calculation and rerouting
-- Geofence and 2 km proximity alerts
-- Fuel risk states and 30% adverse-weather fuel penalty
-- Weather-aware fleet telemetry
-- Captain distress endpoint with structured severity/problem/injury extraction
-- One-hour fleet playback buffer at 30-second snapshots
+---
 
-## Local run
-### Backend
-```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-# keep this terminal running
-```
+## 🌐 Live Demo
 
 ### Frontend
+
+**https://fleetsentinel-production-cd66.up.railway.app/**
+
+### Backend
+
+**https://fleetsentinel-production.up.railway.app/**
+
+> The production system uses a React frontend connected to a FastAPI backend through REST APIs and a real-time WebSocket channel.
+
+---
+
+## 📌 Overview
+
+**FleetSentinel** is a full-stack maritime fleet operations and crisis-management platform designed around a live simulated fleet of **15 commercial cargo ships**.
+
+The platform provides a command-center style interface where operators can monitor vessel movement, inspect ship information, identify operational risks, review incidents, and manage crisis-response workflows.
+
+Unlike a static dashboard, FleetSentinel uses **real-time WebSocket communication** to continuously stream fleet updates to the frontend.
+
+---
+
+## 🎯 Objectives
+
+FleetSentinel was designed to demonstrate how a modern fleet command system can combine:
+
+* Real-time fleet monitoring
+* Geospatial visualization
+* Operational risk detection
+* Crisis management
+* Incident response
+* Dispatch workflows
+* Live data streaming
+* Containerized deployment
+* Cloud deployment
+
+---
+
+# 🚢 Core Features
+
+## 1. Real-Time Fleet Monitoring
+
+FleetSentinel continuously tracks **15 commercial cargo ships** through a live fleet simulator.
+
+Each vessel can provide operational information such as:
+
+* Vessel name
+* Vessel ID
+* Current position
+* Latitude
+* Longitude
+* Fuel status
+* Operational status
+* Current movement
+* Crisis-related conditions
+
+Fleet positions are continuously updated through the backend WebSocket service.
+
+---
+
+## 2. 🗺️ Interactive Maritime Map
+
+The frontend uses **React Leaflet** for interactive geospatial visualization.
+
+The map provides:
+
+* Live vessel markers
+* Vessel popups
+* Vessel information
+* Real-time movement
+* Maritime region visualization
+* Strait of Hormuz region
+* Persian Gulf
+* Gulf of Oman
+
+The map is designed to behave like a simplified maritime operations center.
+
+---
+
+## 3. 🚨 Crisis Center
+
+The Crisis Center provides centralized monitoring of operational incidents.
+
+Supported crisis conditions include:
+
+* ⚠️ Warning
+* 🔴 Critical
+* 🆘 Distress
+* ⛽ Insufficient Fuel
+* 🚢 Stranded Vessel
+
+Operators can filter incidents according to their operational severity or condition.
+
+---
+
+## 4. 📡 Dispatch & Incident Management
+
+FleetSentinel includes a dispatch workflow for handling fleet incidents.
+
+The backend provides APIs for:
+
+* Incident retrieval
+* Incident history
+* Distress events
+* Dispatch operations
+* Event playback
+
+This creates a foundation for a command-and-response workflow rather than simply displaying vessel locations.
+
+---
+
+## 5. 📊 Analytics
+
+The Analytics section provides an operational overview of fleet activity and incidents.
+
+It is intended to help operators understand:
+
+* Fleet conditions
+* Operational incidents
+* Crisis activity
+* Vessel status
+* Response-related information
+
+---
+
+## 6. 🔌 Real-Time WebSocket Communication
+
+FleetSentinel uses WebSockets for live fleet updates.
+
+### WebSocket endpoint
+
+```text
+wss://fleetsentinel-production.up.railway.app/ws/fleet
+```
+
+The backend continuously publishes updated fleet information, allowing the frontend to update ship positions without repeatedly refreshing the page.
+
+---
+
+# 🏗️ System Architecture
+
+```text
+                         ┌─────────────────────────┐
+                         │      User / Browser      │
+                         └────────────┬────────────┘
+                                      │
+                                      ▼
+                    ┌────────────────────────────────┐
+                    │        React Frontend          │
+                    │                                │
+                    │ Dashboard                      │
+                    │ Fleet                          │
+                    │ Crisis Center                  │
+                    │ Dispatch                       │
+                    │ Analytics                      │
+                    │ Interactive Map                 │
+                    └───────────────┬────────────────┘
+                                    │
+                    ┌───────────────┴────────────────┐
+                    │                                │
+                    │ REST API                       │ WebSocket
+                    │                                │
+                    ▼                                ▼
+             ┌────────────────────────────────────────────┐
+             │              FastAPI Backend                 │
+             │                                             │
+             │ Fleet API                                    │
+             │ Dispatch API                                 │
+             │ Incident Operations                          │
+             │ WebSocket Service                            │
+             └────────────────────┬───────────────────────┘
+                                  │
+                                  ▼
+                       ┌─────────────────────────┐
+                       │     Fleet Simulator     │
+                       │                         │
+                       │  15 Cargo Ships         │
+                       │  Live Positions         │
+                       │  Fleet State            │
+                       │  Operational Events     │
+                       └─────────────────────────┘
+
+                                  │
+                                  ▼
+                       ┌─────────────────────────┐
+                       │        Railway          │
+                       │                         │
+                       │  Frontend + Backend     │
+                       └─────────────────────────┘
+```
+
+---
+
+# 🧰 Tech Stack
+
+## Frontend
+
+| Technology    | Purpose                  |
+| ------------- | ------------------------ |
+| React         | UI development           |
+| Vite          | Frontend build tooling   |
+| JavaScript    | Application logic        |
+| React Leaflet | Interactive map          |
+| Leaflet       | Geospatial visualization |
+| CSS           | UI styling               |
+
+## Backend
+
+| Technology | Purpose                 |
+| ---------- | ----------------------- |
+| Python     | Backend development     |
+| FastAPI    | REST API framework      |
+| Pydantic   | Data validation         |
+| WebSockets | Real-time communication |
+| AsyncIO    | Asynchronous simulation |
+
+## DevOps & Deployment
+
+| Technology | Purpose                    |
+| ---------- | -------------------------- |
+| Docker     | Containerization           |
+| Nginx      | Frontend production server |
+| Railway    | Cloud deployment           |
+| Git        | Version control            |
+| GitHub     | Source-code hosting        |
+
+---
+
+# 📂 Project Structure
+
+```text
+fleet-crisis-command/
+│
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── dispatch.py
+│   │   │   └── websocket.py
+│   │   │
+│   │   ├── simulator/
+│   │   │   └── engine.py
+│   │   │
+│   │   └── main.py
+│   │
+│   └── requirements.txt
+│
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   ├── pages/
+│   │   └── ...
+│   │
+│   ├── Dockerfile
+│   ├── nginx.conf
+│   └── package.json
+│
+└── README.md
+```
+
+---
+
+# 🔄 Application Flow
+
+```text
+Fleet Simulator
+      │
+      │ Live vessel state
+      ▼
+FastAPI Backend
+      │
+      ├──────────────► REST APIs
+      │
+      └──────────────► WebSocket
+                              │
+                              ▼
+                       React Frontend
+                              │
+                ┌─────────────┼─────────────┐
+                ▼             ▼             ▼
+              Fleet        Crisis       Analytics
+               Map         Center
+                │             │
+                └─────────────┼─────────────┘
+                              ▼
+                           Dispatch
+```
+
+---
+
+# 🔌 API Endpoints
+
+## Health Check
+
+```http
+GET /health
+```
+
+Returns the backend health status.
+
+---
+
+## Fleet
+
+```http
+GET /api/fleet
+```
+
+Returns the current fleet information.
+
+Example response structure:
+
+```json
+{
+  "count": 15,
+  "ships": []
+}
+```
+
+---
+
+## Dispatch
+
+Dispatch operations are available under:
+
+```text
+/api/dispatch/...
+```
+
+These APIs support incident and crisis-response operations.
+
+---
+
+## WebSocket
+
+```text
+/ws/fleet
+```
+
+The WebSocket provides continuous fleet updates to connected clients.
+
+---
+
+# 💻 Local Development
+
+## Prerequisites
+
+Make sure the following are installed:
+
+* Python 3.11+
+* Node.js
+* npm
+* Git
+* Docker Desktop (optional for local container testing)
+
+---
+
+## 1. Clone Repository
+
 ```powershell
-cd frontend
+git clone https://github.com/Shahzaib1106/fleet-crisis-command.git
+cd fleet-crisis-command
+```
+
+---
+
+# 🐍 Backend Setup
+
+Go to the backend:
+
+```powershell
+cd backend
+```
+
+Create a virtual environment:
+
+```powershell
+python -m venv .venv
+```
+
+### Activate `.venv`
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Install dependencies:
+
+```powershell
+pip install -r requirements.txt
+```
+
+Start FastAPI:
+
+```powershell
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Backend will be available at:
+
+```text
+http://localhost:8000
+```
+
+Health check:
+
+```text
+http://localhost:8000/health
+```
+
+### Deactivate `.venv`
+
+When backend work is finished:
+
+```powershell
+deactivate
+```
+
+---
+
+# ⚛️ Frontend Setup
+
+Open a **new PowerShell terminal**.
+
+Go to frontend:
+
+```powershell
+cd "C:\Users\Shahzaib\Desktop\fleet-crisis-command\frontend"
+```
+
+Install dependencies:
+
+```powershell
 npm install
+```
+
+Start development server:
+
+```powershell
 npm run dev
 ```
 
-WebSocket: `ws://127.0.0.1:8000/ws/fleet`
-API: `http://127.0.0.1:8000`
+Frontend will normally run at:
 
-After stopping backend work, run `deactivate` in the backend terminal.
-
-## Docker
-```powershell
-docker compose up --build
+```text
+http://localhost:5173
 ```
-Then open `http://localhost`.
 
-## Main APIs
-- `GET /health`
-- `GET /api/fleet`
-- `POST /api/dispatch/command`
-- `GET /api/dispatch/incidents`
-- `POST /api/dispatch/incident/action`
-- `GET/POST/PUT/DELETE /api/dispatch/zones`
-- `GET /api/dispatch/alerts`
-- `GET /api/dispatch/playback`
-- `POST /api/dispatch/distress`
-- `WS /ws/fleet`
+---
 
-## Notes
-Weather uses Open-Meteo's free forecast endpoint. If the weather service is temporarily unavailable, the simulator falls back to neutral weather instead of stopping the fleet.
+# 🐳 Docker
+
+FleetSentinel's frontend is containerized using Docker and served through Nginx.
+
+## Build
+
+From the project root:
+
+```powershell
+docker build -t fleet-frontend ./frontend
+```
+
+## Run
+
+```powershell
+docker run --rm -p 8080:8080 fleet-frontend
+```
+
+Open:
+
+```text
+http://localhost:8080
+```
+
+---
+
+# ⚙️ Environment Configuration
+
+## Backend
+
+The backend supports configurable frontend origins through:
+
+```text
+FRONTEND_ORIGINS
+```
+
+Example:
+
+```text
+FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,https://fleetsentinel-production-cd66.up.railway.app
+```
+
+This allows the FastAPI CORS middleware to accept requests from local and production frontend environments.
+
+---
+
+## Frontend
+
+Production API configuration:
+
+```text
+VITE_API_URL=https://fleetsentinel-production.up.railway.app
+```
+
+Production WebSocket configuration:
+
+```text
+VITE_WS_URL=wss://fleetsentinel-production.up.railway.app/ws/fleet
+```
+
+---
+
+# ☁️ Production Deployment
+
+FleetSentinel is deployed using **Railway**.
+
+### Frontend
+
+```text
+https://fleetsentinel-production-cd66.up.railway.app/
+```
+
+The frontend is:
+
+```text
+React → Vite → Docker → Nginx → Railway
+```
+
+### Backend
+
+```text
+https://fleetsentinel-production.up.railway.app/
+```
+
+The backend is:
+
+```text
+FastAPI → Docker/Runtime → Railway
+```
+
+---
+
+# 🧪 Testing
+
+The system was tested across the following areas:
+
+* Backend health endpoint
+* Fleet API
+* WebSocket connectivity
+* 15-ship fleet simulation
+* Real-time position updates
+* Frontend/backend communication
+* CORS configuration
+* Crisis Center
+* Dispatch APIs
+* Incident history
+* Distress operations
+* Docker frontend build
+* Local Nginx container
+* Railway production deployment
+
+---
+
+# 🔐 Production Considerations
+
+The current version focuses on fleet simulation and operational workflow.
+
+For a production maritime deployment, the following would be required:
+
+* Authentication
+* Role-based access control
+* Persistent database storage
+* Real AIS data
+* Encrypted operational infrastructure
+* Audit logging
+* Monitoring and observability
+* Backup and recovery
+* Stronger API security
+* Production-grade alerting
+
+---
+
+# 🚀 Future Roadmap
+
+Potential future extensions include:
+
+### Phase 1 — Data Layer
+
+* PostgreSQL integration
+* Persistent vessel records
+* Persistent incident history
+* Historical fleet playback
+
+### Phase 2 — Real Maritime Data
+
+* AIS integration
+* Live vessel positions
+* Vessel metadata
+* Port information
+
+### Phase 3 — Intelligence
+
+* Anomaly detection
+* Predictive fuel analysis
+* Route optimization
+* Automated risk scoring
+* ETA prediction
+
+### Phase 4 — Operations
+
+* Authentication
+* Role-based dashboards
+* Operator accounts
+* Notification system
+* Incident escalation
+
+### Phase 5 — Advanced Monitoring
+
+* Weather integration
+* Sea-condition monitoring
+* Geofencing
+* Restricted-zone alerts
+* Advanced fleet analytics
+
+---
+
+# 📈 What This Project Demonstrates
+
+FleetSentinel demonstrates practical experience with:
+
+* Full-stack web application development
+* React architecture
+* FastAPI backend development
+* REST API design
+* WebSocket communication
+* Asynchronous Python programming
+* Real-time state synchronization
+* Geospatial applications
+* Interactive map development
+* Incident-management workflows
+* Docker containerization
+* Nginx configuration
+* Cloud deployment
+* CORS configuration
+* Production debugging
+* Git/GitHub workflow
+
+---
+
+# 👨‍💻 Author
+
+## Shahzaib Ahmad
+
+**BSCS — Lahore Garrison University**
+
+Interested in:
+
+* Backend Development
+* Python
+* AI & Machine Learning
+* Full-Stack Development
+* Cloud & Deployment
+* Real-Time Systems
+
+### Links
+
+* GitHub: **https://github.com/Shahzaib1106**
+* LinkedIn: **https://www.linkedin.com/in/shahzaib-ahmad1105/**
+
+---
+
+# 📜 License
+
+This project is intended primarily as an educational, portfolio, and demonstration project.
+
+---
+
+## ⭐ FleetSentinel
+
+**Real-time fleet visibility. Crisis awareness. Operational response.**
